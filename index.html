@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Context Compass - Antigravity Token Tracker</title>
+    <title>Session Fuel</title>
     <link rel="stylesheet" href="style.css" />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
@@ -15,8 +15,8 @@
       <!-- Drag Handle -->
       <div class="widget-header" id="dragHandle">
         <div class="widget-title">
-          <span class="compass-icon">🧭</span>
-          <span>Context Compass</span>
+          <span class="compass-icon">⛽</span>
+          <span>Session Fuel</span>
         </div>
         <button class="minimize-btn" id="minimizeBtn">−</button>
       </div>
@@ -60,8 +60,11 @@
 
         <!-- Conversation Selector -->
         <div class="conversation-section">
-          <label class="section-label">Conversation ID</label>
-          <input type="text" id="conversationId" placeholder="Paste ID (e.g. 0b552985-2b99-42d7-88e0-7d1b709f2413)" />
+          <label class="section-label">Session <button class="scan-btn" id="scanBtn" title="Scan for sessions">🔄</button></label>
+          <select id="sessionSelect">
+            <option value="">-- Select a session --</option>
+          </select>
+          <input type="text" id="conversationId" placeholder="Or paste ID manually" />
         </div>
 
         <!-- Warning Banner -->
@@ -70,17 +73,16 @@
           <span>Approaching limit! Consider generating handoff.</span>
         </div>
 
-        <!-- Context Notes -->
-        <div class="notes-section">
-          <label class="section-label">Context Notes</label>
+        <!-- Context Notes (Collapsible) -->
+        <details class="notes-section">
+          <summary class="section-label">Context Notes ▾</summary>
           <textarea
             id="contextNotes"
-            placeholder="• Current task: ...
-• Files modified: ...
-• Key decisions: ...
-• Next steps: ..."
+            placeholder="• Task: ...
+• Files: ...
+• Next: ..."
           ></textarea>
-        </div>
+        </details>
 
         <!-- Handoff Output -->
         <div class="handoff-section" id="handoffSection">

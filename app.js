@@ -17,6 +17,8 @@ class ContextCompass {
             warningBanner: document.getElementById('warningBanner'),
             contextNotes: document.getElementById('contextNotes'),
             conversationId: document.getElementById('conversationId'),
+            sessionSelect: document.getElementById('sessionSelect'),
+            scanBtn: document.getElementById('scanBtn'),
             handoffSection: document.getElementById('handoffSection'),
             handoffOutput: document.getElementById('handoffOutput'),
             generateBtn: document.getElementById('generateBtn'),
@@ -84,6 +86,51 @@ class ContextCompass {
         this.loadState();
         this.bindEvents();
         this.updateGauge();
+        this.loadSessions();
+    }
+
+    async loadSessions() {
+        try {
+            const response = await fetch('active-session.json?' + Date.now());
+            const data = await response.json();
+            
+            // Store sessions for later lookup
+            this.sessions = {};
+            
+            // Clear existing options except first
+            this.elements.sessionSelect.innerHTML = '<option value="">-- Select session --</option>';
+            
+            // Add recent sessions
+            for (const session of data.recentSessions || []) {
+                this.sessions[session.id] = session;
+                const option = document.createElement('option');
+                option.value = session.id;
+                const tokens = Math.round(session.estimatedTokens / 1000);
+                const date = new Date(session.modified).toLocaleDateString();
+                option.textContent = `${session.id.slice(0,8)}... (~${tokens}K, ${date})`;
+                this.elements.sessionSelect.appendChild(option);
+            }
+            
+            // Auto-select active session if no manual ID
+            if (!this.elements.conversationId.value && data.activeSession) {
+                this.elements.sessionSelect.value = data.activeSession.id;
+                this.elements.conversationId.value = data.activeSession.id;
+                this.autoFillTokens(data.activeSession);
+                this.saveState();
+            }
+        } catch (err) {
+            console.log('No session data found. Run: node scan-sessions.js');
+        }
+    }
+
+    autoFillTokens(session) {
+        if (session && session.estimatedTokens) {
+            const contextWindow = parseInt(this.elements.contextWindow.value);
+            const tokensUsed = session.estimatedTokens;
+            const tokensLeft = Math.max(0, contextWindow - tokensUsed);
+            this.elements.tokensLeft.value = tokensLeft;
+            this.updateGauge();
+        }
     }
 
     bindEvents() {
@@ -106,6 +153,24 @@ class ContextCompass {
         // Conversation ID auto-save
         this.elements.conversationId.addEventListener('input', () => {
             this.saveState();
+        });
+
+        // Session select
+        this.elements.sessionSelect.addEventListener('change', () => {
+            const selected = this.elements.sessionSelect.value;
+            if (selected) {
+                this.elements.conversationId.value = selected;
+                // Auto-fill tokens from stored session data
+                if (this.sessions && this.sessions[selected]) {
+                    this.autoFillTokens(this.sessions[selected]);
+                }
+                this.saveState();
+            }
+        });
+
+        // Scan button
+        this.elements.scanBtn.addEventListener('click', () => {
+            this.loadSessions();
         });
 
         // Minimize toggle

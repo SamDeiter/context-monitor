@@ -1,18 +1,18 @@
 :root {
-  --bg-primary: rgba(15, 15, 25, 0.95);
-  --bg-secondary: rgba(30, 30, 50, 0.8);
-  --bg-tertiary: rgba(45, 45, 70, 0.6);
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0c0;
-  --text-muted: #6a6a8a;
-  --accent-green: #00ff88;
-  --accent-yellow: #ffcc00;
-  --accent-red: #ff4466;
-  --accent-purple: #8855ff;
-  --border-color: rgba(255, 255, 255, 0.1);
-  --shadow-glow: 0 0 40px rgba(136, 85, 255, 0.3);
-  --radius: 16px;
-  --radius-sm: 8px;
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --accent-green: #3fb950;
+  --accent-yellow: #d29922;
+  --accent-red: #f85149;
+  --accent-blue: #58a6ff;
+  --border-color: #30363d;
+  --shadow-glow: 0 0 20px rgba(88, 166, 255, 0.15);
+  --radius: 12px;
+  --radius-sm: 6px;
 }
 
 * {
@@ -23,16 +23,18 @@
 
 body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
-  background: transparent;
+  background: linear-gradient(135deg, #0a0a15 0%, #1a1a2e 50%, #0f0f1f 100%);
   min-height: 100vh;
   margin: 0;
-  padding: 0;
+  padding: 8px;
+  box-sizing: border-box;
 }
 
 /* Widget Container */
 .widget {
   width: 100%;
-  height: 100vh;
+  max-width: 300px;
+  margin: 0 auto;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
@@ -57,8 +59,9 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 18px;
-  background: linear-gradient(135deg, var(--accent-purple) 0%, #6644cc 100%);
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
   cursor: move;
   user-select: none;
 }
@@ -66,16 +69,15 @@ body {
 .widget-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-primary);
   letter-spacing: 0.5px;
 }
 
 .compass-icon {
-  font-size: 18px;
-  animation: spin 8s linear infinite;
+  font-size: 14px;
 }
 
 @keyframes spin {
@@ -107,10 +109,10 @@ body {
 
 /* Content */
 .widget-content {
-  padding: 18px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   flex: 1;
   overflow-y: auto;
 }
@@ -118,7 +120,7 @@ body {
 /* Gauge Section */
 .gauge-section {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
 }
 
@@ -127,6 +129,7 @@ body {
   margin-top: -8px;
 }
 
+.conversation-section select,
 .conversation-section input {
   width: 100%;
   background: var(--bg-secondary);
@@ -137,8 +140,10 @@ body {
   font-size: 11px;
   font-family: 'Consolas', 'Monaco', monospace;
   transition: border-color 0.2s, box-shadow 0.2s;
+  margin-bottom: 6px;
 }
 
+.conversation-section select:focus,
 .conversation-section input:focus {
   outline: none;
   border-color: var(--accent-purple);
@@ -149,10 +154,24 @@ body {
   color: var(--text-muted);
 }
 
+.scan-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 4px;
+  vertical-align: middle;
+  transition: transform 0.2s;
+}
+
+.scan-btn:hover {
+  transform: rotate(180deg);
+}
+
 .gauge-container {
   position: relative;
-  width: 90px;
-  height: 90px;
+  width: 70px;
+  height: 70px;
   flex-shrink: 0;
 }
 

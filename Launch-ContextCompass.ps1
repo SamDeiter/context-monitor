@@ -43,7 +43,7 @@ if ($browser) {
     # Launch in app mode with specific window size
     $args = @(
         "--app=$htmlPath",
-        "--window-size=360,620",
+        "--window-size=380,580",
         "--window-position=50,50",
         "--disable-extensions",
         "--new-window"

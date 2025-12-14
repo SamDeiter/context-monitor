@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-12-14T02:23:25.823Z",
+  "activeSession": {
+    "id": "0b552985-2b99-42d7-88e0-7d1b709f2413",
+    "size": 10045214,
+    "modified": "2025-12-14T02:23:25.462Z",
+    "estimatedTokens": 2511304
+  },
+  "recentSessions": [
+    {
+      "id": "0b552985-2b99-42d7-88e0-7d1b709f2413",
+      "size": 10045214,
+      "modified": "2025-12-14T02:23:25.462Z",
+      "estimatedTokens": 2511304
+    },
+    {
+      "id": "bffa4d54-4b87-4587-9dc1-601bda8ed7dc",
+      "size": 4090397,
+      "modified": "2025-12-14T02:23:16.984Z",
+      "estimatedTokens": 1022599
+    },
+    {
+      "id": "73027d49-94e2-49f7-b398-ee06b82d48ba",
+      "size": 5277495,
+      "modified": "2025-12-14T01:46:26.255Z",
+      "estimatedTokens": 1319374
+    },
+    {
+      "id": "69af3ca1-0764-4fd7-8dd0-13bf4e4d0ab3",
+      "size": 8307021,
+      "modified": "2025-12-10T16:14:02.762Z",
+      "estimatedTokens": 2076755
+    },
+    {
+      "id": "821b1d4f-e0e4-4f4b-a00a-c41ce520e2bd",
+      "size": 19658731,
+      "modified": "2025-12-09T21:31:24.741Z",
+      "estimatedTokens": 4914683
+    }
+  ]
+}
