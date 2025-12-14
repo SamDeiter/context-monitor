@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Context Compass - Antigravity Token Tracker</title>
+    <link rel="stylesheet" href="style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="widget" id="widget">
+      <!-- Drag Handle -->
+      <div class="widget-header" id="dragHandle">
+        <div class="widget-title">
+          <span class="compass-icon">🧭</span>
+          <span>Context Compass</span>
+        </div>
+        <button class="minimize-btn" id="minimizeBtn">−</button>
+      </div>
+
+      <!-- Main Content -->
+      <div class="widget-content" id="widgetContent">
+        <!-- Token Gauge Section -->
+        <div class="gauge-section">
+          <div class="gauge-container">
+            <svg class="gauge" viewBox="0 0 120 120">
+              <circle class="gauge-bg" cx="60" cy="60" r="50" />
+              <circle
+                class="gauge-fill"
+                id="gaugeFill"
+                cx="60"
+                cy="60"
+                r="50"
+              />
+            </svg>
+            <div class="gauge-text">
+              <span class="gauge-percent" id="gaugePercent">0%</span>
+              <span class="gauge-label">used</span>
+            </div>
+          </div>
+          <div class="token-inputs">
+            <div class="input-group">
+              <label>Tokens Left</label>
+              <input type="text" id="tokensLeft" placeholder="e.g. 173055" />
+            </div>
+            <div class="input-group">
+              <label>Context Window</label>
+              <select id="contextWindow">
+                <option value="200000">200K</option>
+                <option value="128000">128K</option>
+                <option value="100000">100K</option>
+                <option value="32000">32K</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Warning Banner -->
+        <div class="warning-banner" id="warningBanner">
+          <span class="warning-icon">⚠️</span>
+          <span>Approaching limit! Consider generating handoff.</span>
+        </div>
+
+        <!-- Context Notes -->
+        <div class="notes-section">
+          <label class="section-label">Context Notes</label>
+          <textarea
+            id="contextNotes"
+            placeholder="• Current task: ...
+• Files modified: ...
+• Key decisions: ...
+• Next steps: ..."
+          ></textarea>
+        </div>
+
+        <!-- Handoff Output -->
+        <div class="handoff-section" id="handoffSection">
+          <label class="section-label">Generated Handoff</label>
+          <div class="handoff-output" id="handoffOutput"></div>
+          <button class="copy-btn" id="copyBtn">📋 Copy to Clipboard</button>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+          <button class="btn btn-primary" id="generateBtn">
+            🚀 Generate Handoff
+          </button>
+          <button class="btn btn-secondary" id="clearBtn">🗑️ Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
