@@ -16,6 +16,7 @@ class ContextCompass {
             gaugePercent: document.getElementById('gaugePercent'),
             warningBanner: document.getElementById('warningBanner'),
             contextNotes: document.getElementById('contextNotes'),
+            conversationId: document.getElementById('conversationId'),
             handoffSection: document.getElementById('handoffSection'),
             handoffOutput: document.getElementById('handoffOutput'),
             generateBtn: document.getElementById('generateBtn'),
@@ -99,6 +100,11 @@ class ContextCompass {
 
         // Notes auto-save
         this.elements.contextNotes.addEventListener('input', () => {
+            this.saveState();
+        });
+
+        // Conversation ID auto-save
+        this.elements.conversationId.addEventListener('input', () => {
             this.saveState();
         });
 
@@ -186,6 +192,7 @@ class ContextCompass {
         const percentUsed = Math.round((tokensUsed / contextWindow) * 100);
 
         const notes = this.elements.contextNotes.value.trim();
+        const conversationId = this.elements.conversationId.value.trim() || 'Not specified';
         const timestamp = new Date().toLocaleString();
 
         // Parse notes to extract structured info
@@ -193,6 +200,7 @@ class ContextCompass {
 
         const handoff = `## 🧭 Context Handoff
 **Generated:** ${timestamp}
+**Conversation ID:** ${conversationId}
 **Session Usage:** ${tokensUsed.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${percentUsed}% used)
 
 ---
@@ -323,6 +331,7 @@ ${parsed.other || 'None'}
             tokensLeft: this.elements.tokensLeft.value,
             contextWindow: this.elements.contextWindow.value,
             notes: this.elements.contextNotes.value,
+            conversationId: this.elements.conversationId.value,
             minimized: this.elements.widget.classList.contains('minimized'),
             position: {
                 left: this.elements.widget.style.left,
@@ -346,6 +355,9 @@ ${parsed.other || 'None'}
                 }
                 if (state.notes) {
                     this.elements.contextNotes.value = state.notes;
+                }
+                if (state.conversationId) {
+                    this.elements.conversationId.value = state.conversationId;
                 }
                 if (state.minimized) {
                     this.elements.widget.classList.add('minimized');

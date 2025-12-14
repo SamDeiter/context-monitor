@@ -122,6 +122,33 @@ body {
   align-items: center;
 }
 
+/* Conversation Section */
+.conversation-section {
+  margin-top: -8px;
+}
+
+.conversation-section input {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.conversation-section input:focus {
+  outline: none;
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 0 3px rgba(136, 85, 255, 0.2);
+}
+
+.conversation-section input::placeholder {
+  color: var(--text-muted);
+}
+
 .gauge-container {
   position: relative;
   width: 90px;
