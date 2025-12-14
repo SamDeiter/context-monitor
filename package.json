@@ -2,15 +2,26 @@
   "name": "context-compass",
   "version": "1.0.0",
   "description": "Floating token usage tracker for Antigravity IDE",
-  "main": "main.js",
+  "main": "index.html",
   "scripts": {
-    "start": "electron .",
-    "build": "electron-builder"
+    "start": "nw .",
+    "start-electron": "electron ."
+  },
+  "window": {
+    "title": "Context Compass",
+    "width": 360,
+    "height": 620,
+    "frame": false,
+    "transparent": true,
+    "always_on_top": true,
+    "resizable": true,
+    "show_in_taskbar": true,
+    "position": "center"
   },
   "keywords": ["antigravity", "token-tracker", "ai-assistant"],
   "author": "Sam Deiter",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^28.0.0"
+    "nw": "^0.83.0"
   }
 }
