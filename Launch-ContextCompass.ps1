@@ -43,14 +43,14 @@ if ($browser) {
     # Launch in app mode with specific window size
     $args = @(
         "--app=$htmlPath",
-        "--window-size=380,580",
-        "--window-position=50,50",
+        "--window-size=320,450",
+        "--window-position=100,100",
         "--disable-extensions",
         "--new-window"
     )
     
     Start-Process $browser -ArgumentList $args
-    Write-Host "Context Compass is now running as a standalone window!" -ForegroundColor Green
+    Write-Host "Session Fuel is now running!" -ForegroundColor Green
     Write-Host "Tip: You can manually set it to 'Always on Top' using a tool like PowerToys" -ForegroundColor Yellow
 } else {
     Write-Host "Error: Neither Chrome nor Edge was found." -ForegroundColor Red
