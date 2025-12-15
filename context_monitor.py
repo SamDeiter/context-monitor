@@ -582,7 +582,7 @@ Read those logs to understand what we were working on, then continue helping me.
                     return json.load(f)
         except Exception as e:
             print(f"Error loading settings: {e}")
-        return {'alpha': 0.95, 'mini_mode': False}
+        return {'alpha': 0.95, 'mini_mode': False, 'advanced_mode': True}
     
     def save_settings(self):
         """Save settings to JSON file"""
