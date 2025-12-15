@@ -4,9 +4,12 @@ Borderless, always-on-top token usage tracker for Antigravity
 """
 
 import tkinter as tk
+from tkinter import messagebox
 from pathlib import Path
 from datetime import datetime
 import json
+import subprocess
+import os
 
 class ContextMonitor:
     def __init__(self):
@@ -88,6 +91,7 @@ class ContextMonitor:
             
             # Interactions
             self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
+            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
             
             # Bind drag to canvas
             self.gauge_canvas.bind('<Button-1>', self.start_drag)
@@ -134,45 +138,54 @@ class ContextMonitor:
             for w in [header, title]:
                 w.bind('<Button-1>', self.start_drag)
                 w.bind('<B1-Motion>', self.drag)
+                w.bind('<Button-3>', self.show_context_menu)
             
             # Content
             content = tk.Frame(self.root, bg=self.colors['bg2'], padx=15, pady=12)
             content.pack(fill='both', expand=True)
+            content.bind('<Button-3>', self.show_context_menu)
             
             # Main row
             main = tk.Frame(content, bg=self.colors['bg2'])
             main.pack(fill='x')
+            main.bind('<Button-3>', self.show_context_menu)
             
             # Gauge
             self.gauge_canvas = tk.Canvas(main, width=70, height=70, 
                                           bg=self.colors['bg2'], highlightthickness=0)
             self.gauge_canvas.pack(side='left', padx=(0, 12))
+            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
             self.draw_gauge(self.current_percent)
             
             # Info
             info = tk.Frame(main, bg=self.colors['bg2'])
             info.pack(side='left', fill='both', expand=True)
+            info.bind('<Button-3>', self.show_context_menu)
             
             tk.Label(info, text="TOKENS LEFT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
             self.tokens_label = tk.Label(info, text="—", font=('Segoe UI', 14, 'bold'),
                                          bg=self.colors['bg2'], fg=self.colors['text'])
             self.tokens_label.pack(anchor='w')
+            self.tokens_label.bind('<Button-3>', self.show_context_menu)
             
-            tk.Label(info, text="SESSION ID", font=('Segoe UI', 8),
+            tk.Label(info, text="PROJECT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(8,0))
-            self.session_label = tk.Label(info, text="—", font=('Consolas', 8),
+            self.session_label = tk.Label(info, text="—", font=('Segoe UI', 8),
                                           bg=self.colors['bg2'], fg=self.colors['text2'])
             self.session_label.pack(anchor='w')
+            self.session_label.bind('<Button-3>', self.show_context_menu)
             
             # Status bar with copy button
             self.status_frame = tk.Frame(content, bg=self.colors['bg3'], padx=8, pady=6)
             self.status_frame.pack(fill='x', pady=(10, 0))
+            self.status_frame.bind('<Button-3>', self.show_context_menu)
             
             self.status_label = tk.Label(self.status_frame, text="✓ Loading...", 
                                         font=('Segoe UI', 9),
                                         bg=self.colors['bg3'], fg=self.colors['text2'])
             self.status_label.pack(side='left')
+            self.status_label.bind('<Button-3>', self.show_context_menu)
             
             self.copy_btn = tk.Label(self.status_frame, text="📋 Copy", 
                                     font=('Segoe UI', 8), cursor='hand2',
@@ -230,23 +243,26 @@ class ContextMonitor:
                                          extent=-360*(percent/100),
                                          style='arc', outline=color, width=arc_width, tags='arc')
         
-        # Larger fonts for mini mode
-        pct_font_size = 18 if self.mini_mode else 14
-        label_font_size = 9 if self.mini_mode else 7
+        # Font sizes
+        pct_font_size = 22 if self.mini_mode else 14
+        label_font_size = 7
         
         # Drop shadow for mini mode (offset dark text behind)
         if self.mini_mode:
             shadow_offset = 2
             shadow_color = '#000000'
-            self.gauge_canvas.create_text(cx+shadow_offset, cy-6+shadow_offset, text=f"{percent}%", 
+            self.gauge_canvas.create_text(cx+shadow_offset, cy+shadow_offset, text=f"{percent}%", 
                                           font=('Segoe UI', pct_font_size, 'bold'), fill=shadow_color, tags='text')
-            self.gauge_canvas.create_text(cx+shadow_offset, cy+14+shadow_offset, text="CONTEXT", 
-                                          font=('Segoe UI', label_font_size), fill=shadow_color, tags='text')
         
-        self.gauge_canvas.create_text(cx, cy-6, text=f"{percent}%", 
+        # Percentage text (centered in mini mode, offset in full mode)
+        y_offset = 0 if self.mini_mode else -6
+        self.gauge_canvas.create_text(cx, cy + y_offset, text=f"{percent}%", 
                                       font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
-        self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
-                                      font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
+        
+        # Only show CONTEXT label in full mode
+        if not self.mini_mode:
+            self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
+                                          font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
         
     def get_sessions(self):
         sessions = []
@@ -265,7 +281,42 @@ class ContextMonitor:
             print(f"Error: {e}")
         return sessions
 
-
+    def get_project_name(self, session_id):
+        """Extract project name from brain directory task.md"""
+        try:
+            brain_dir = Path.home() / '.gemini' / 'antigravity' / 'brain' / session_id
+            task_file = brain_dir / 'task.md'
+            
+            if task_file.exists():
+                with open(task_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Look for first heading (# Project Name)
+                    for line in content.split('\n'):
+                        line = line.strip()
+                        if line.startswith('# '):
+                            name = line[2:].strip()
+                            # Truncate if too long
+                            if len(name) > 25:
+                                return name[:22] + '...'
+                            return name
+            
+            # Fallback: check implementation_plan.md
+            plan_file = brain_dir / 'implementation_plan.md'
+            if plan_file.exists():
+                with open(plan_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('# '):
+                            name = line[2:].strip()
+                            if len(name) > 25:
+                                return name[:22] + '...'
+                            return name
+                            
+        except Exception as e:
+            print(f"Error getting project name: {e}")
+        
+        # Final fallback: short session ID
+        return f"Session {session_id[:8]}..."
     
     def load_session(self):
         sessions = self.get_sessions()
@@ -285,7 +336,10 @@ class ContextMonitor:
         
         if not self.mini_mode:
             self.tokens_label.config(text=f"{tokens_left:,}")
-            self.session_label.config(text=f"{self.current_session['id'][:18]}...")
+            
+            # Try to get project name from brain directory
+            project_name = self.get_project_name(self.current_session['id'])
+            self.session_label.config(text=project_name)
             
             # Update status and auto-copy at 80%
             if percent >= 80:
@@ -299,7 +353,7 @@ class ContextMonitor:
                 self.status_frame.config(bg='#2d2a1a')
                 self.handoff_copied = False
             else:
-                self.status_label.config(text="✓ Plenty of fuel", fg=self.colors['green'])
+                self.status_label.config(text="✓ Context healthy", fg=self.colors['green'])
                 self.status_frame.config(bg=self.colors['bg3'])
                 self.handoff_copied = False
             
@@ -414,6 +468,207 @@ Read those logs to understand what we were working on, then continue helping me.
     
     def run(self):
         self.root.mainloop()
+    
+    # ==================== DIAGNOSTICS ====================
+    
+    def show_context_menu(self, event):
+        """Show right-click context menu with improved styling"""
+        menu = tk.Menu(self.root, tearoff=0, 
+                      bg=self.colors['bg2'], 
+                      fg=self.colors['text'],
+                      activebackground=self.colors['blue'], 
+                      activeforeground='white',
+                      font=('Segoe UI', 9),
+                      relief='flat',
+                      borderwidth=1)
+        
+        # Diagnostics section
+        menu.add_command(label="  📊  Show Diagnostics", command=self.show_diagnostics)
+        menu.add_separator()
+        
+        # Actions section
+        menu.add_command(label="  🧹  Clean Old Conversations", command=self.cleanup_old_conversations)
+        menu.add_command(label="  🔄  Restart Antigravity", command=self.restart_antigravity)
+        menu.add_separator()
+        
+        # Mode toggle
+        if self.mini_mode:
+            menu.add_command(label="  ◳  Expand to Full Mode", command=self.toggle_mini_mode)
+        else:
+            menu.add_command(label="  ◱  Collapse to Mini Mode", command=self.toggle_mini_mode)
+        
+        menu.add_separator()
+        menu.add_command(label="  ✕  Exit", command=self.root.destroy)
+        
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+    
+    def get_antigravity_processes(self):
+        """Get memory/CPU usage of Antigravity processes with type info"""
+        try:
+            result = subprocess.run(
+                ['powershell', '-Command', 
+                 'Get-Process -Name Antigravity -ErrorAction SilentlyContinue | '
+                 'Select-Object Id, @{N="CPU";E={[math]::Round($_.CPU,1)}}, '
+                 '@{N="Mem";E={[math]::Round($_.WorkingSet64/1MB,0)}}, '
+                 '@{N="Cmd";E={(Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine}} | '
+                 'Sort-Object Mem -Descending | Select-Object -First 8 | '
+                 'ConvertTo-Json'],
+                capture_output=True, text=True, timeout=15
+            )
+            if result.stdout.strip():
+                data = json.loads(result.stdout)
+                if isinstance(data, dict):
+                    data = [data]
+                # Detect process type from command line
+                for p in data:
+                    cmd = p.get('Cmd', '') or ''
+                    if 'extensionHost' in cmd:
+                        p['Type'] = 'Extension Host'
+                    elif 'renderer' in cmd or 'gpu' in cmd:
+                        p['Type'] = 'Renderer/GPU'
+                    elif 'ptyHost' in cmd:
+                        p['Type'] = 'Terminal'
+                    elif 'fileWatcher' in cmd:
+                        p['Type'] = 'File Watcher'
+                    elif 'languageServer' in cmd or 'tsserver' in cmd:
+                        p['Type'] = 'Language Server'
+                    elif 'sharedProcess' in cmd:
+                        p['Type'] = 'Shared Process'
+                    else:
+                        p['Type'] = 'Main/Other'
+                return data
+        except Exception as e:
+            print(f"Error getting processes: {e}")
+        return []
+    
+    def get_large_conversations(self, min_size_mb=5):
+        """Get conversation files larger than min_size_mb"""
+        large_files = []
+        try:
+            for f in self.conversations_dir.glob('*.pb'):
+                size_mb = f.stat().st_size / (1024 * 1024)
+                if size_mb >= min_size_mb:
+                    large_files.append({
+                        'name': f.stem[:8] + '...',
+                        'size_mb': round(size_mb, 1),
+                        'path': f
+                    })
+            large_files.sort(key=lambda x: x['size_mb'], reverse=True)
+        except Exception as e:
+            print(f"Error scanning files: {e}")
+        return large_files[:5]
+    
+    def show_diagnostics(self):
+        """Show diagnostics popup with detailed recommendations"""
+        procs = self.get_antigravity_processes()
+        files = self.get_large_conversations()
+        
+        # Build message
+        msg = "=== ANTIGRAVITY PROCESSES ===\n"
+        total_mem = 0
+        high_mem_types = []
+        
+        for p in procs:
+            mem = p.get('Mem', 0)
+            total_mem += mem
+            cpu = p.get('CPU', 0)
+            ptype = p.get('Type', 'Unknown')
+            status = "🔴" if mem > 500 else "🟡" if mem > 200 else "🟢"
+            msg += f"{status} {ptype}: {mem}MB RAM, {cpu}s CPU\n"
+            if mem > 400:
+                high_mem_types.append(ptype)
+        
+        msg += f"\nTotal: {total_mem}MB across {len(procs)} processes\n"
+        
+        msg += "\n=== LARGE CONVERSATION FILES ===\n"
+        total_size = sum(f['size_mb'] for f in files)
+        for f in files:
+            status = "🔴" if f['size_mb'] > 15 else "🟡" if f['size_mb'] > 8 else "🟢"
+            msg += f"{status} {f['name']}: {f['size_mb']}MB\n"
+        msg += f"\nTotal large files: {total_size:.1f}MB\n"
+        
+        # Specific recommendations
+        msg += "\n=== WHAT TO DO ===\n"
+        
+        if 'Extension Host' in high_mem_types:
+            msg += "⚠️ Extension Host using high memory!\n"
+            msg += "   → Disable unused extensions\n"
+            msg += "   → Reload Window (Ctrl+Shift+P → Reload)\n\n"
+        
+        if 'Renderer/GPU' in high_mem_types:
+            msg += "⚠️ Renderer process high!\n"
+            msg += "   → Close unused tabs/editors\n"
+            msg += "   → Restart Antigravity\n\n"
+        
+        if 'Language Server' in high_mem_types:
+            msg += "⚠️ Language Server consuming RAM!\n"
+            msg += "   → Close large projects\n"
+            msg += "   → Restart language server\n\n"
+        
+        if total_size > 50:
+            msg += "⚠️ Large conversation files!\n"
+            msg += "   → Use 'Clean Old Conversations'\n\n"
+        
+        if total_mem > 3000:
+            msg += "🔴 CRITICAL: Total memory > 3GB!\n"
+            msg += "   → RESTART ANTIGRAVITY NOW\n"
+        elif total_mem > 2000:
+            msg += "🟡 High memory usage (>2GB)\n"
+            msg += "   → Consider restarting soon\n"
+        elif not high_mem_types and total_size <= 50:
+            msg += "✅ System looks healthy!\n"
+        
+        messagebox.showinfo("Context Monitor - Diagnostics", msg)
+    
+    def cleanup_old_conversations(self):
+        """Delete conversation files older than 7 days and larger than 5MB"""
+        files = self.get_large_conversations(min_size_mb=5)
+        if not files:
+            messagebox.showinfo("Cleanup", "No large files to clean up!")
+            return
+        
+        msg = f"Found {len(files)} large conversation files:\n\n"
+        for f in files:
+            msg += f"• {f['name']}: {f['size_mb']}MB\n"
+        msg += "\nDelete these files? (Current session will be preserved)"
+        
+        if messagebox.askyesno("Cleanup Old Conversations", msg):
+            deleted = 0
+            current_id = self.current_session['id'] if self.current_session else None
+            for f in files:
+                if current_id and current_id in str(f['path']):
+                    continue  # Skip current session
+                try:
+                    f['path'].unlink()
+                    deleted += 1
+                except Exception as e:
+                    print(f"Error deleting {f['path']}: {e}")
+            messagebox.showinfo("Cleanup Complete", f"Deleted {deleted} files.")
+    
+    def restart_antigravity(self):
+        """Restart Antigravity IDE"""
+        if messagebox.askyesno("Restart Antigravity", 
+                               "This will close all Antigravity windows and restart.\n\nContinue?"):
+            try:
+                # Kill all Antigravity processes
+                subprocess.run(['taskkill', '/F', '/IM', 'Antigravity.exe'], 
+                             capture_output=True, timeout=10)
+                # Wait a moment
+                self.root.after(2000, self._launch_antigravity)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to restart: {e}")
+    
+    def _launch_antigravity(self):
+        """Helper to launch Antigravity after restart"""
+        try:
+            antigravity_path = Path.home() / 'AppData' / 'Local' / 'Programs' / 'Antigravity' / 'bin' / 'antigravity.cmd'
+            if antigravity_path.exists():
+                subprocess.Popen([str(antigravity_path)], shell=True)
+        except Exception as e:
+            print(f"Error launching Antigravity: {e}")
 
 class ToolTip:
     def __init__(self, widget, text, colors):
