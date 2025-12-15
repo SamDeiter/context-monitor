@@ -295,9 +295,6 @@ class ContextMonitor:
                         line = line.strip()
                         if line.startswith('# '):
                             name = line[2:].strip()
-                            # Truncate if too long
-                            if len(name) > 25:
-                                return name[:22] + '...'
                             return name
             
             # Fallback: check implementation_plan.md
@@ -308,15 +305,13 @@ class ContextMonitor:
                         line = line.strip()
                         if line.startswith('# '):
                             name = line[2:].strip()
-                            if len(name) > 25:
-                                return name[:22] + '...'
                             return name
                             
         except Exception as e:
             print(f"Error getting project name: {e}")
         
         # Final fallback: short session ID
-        return f"Session {session_id[:8]}..."
+        return f"Session {session_id[:8]}"
     
     def load_session(self):
         sessions = self.get_sessions()
