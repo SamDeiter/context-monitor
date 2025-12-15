@@ -282,30 +282,49 @@ class ContextMonitor:
         return sessions
 
     def get_project_name(self, session_id):
-        """Extract project name from brain directory task.md"""
+        """Extract project name from brain directory"""
         try:
             brain_dir = Path.home() / '.gemini' / 'antigravity' / 'brain' / session_id
-            task_file = brain_dir / 'task.md'
             
+            # Strategy 1: Look for GitHub project path in markdown files
+            # This is most accurate for "Project Name"
+            import re
+            # Pattern matches: .../Documents/GitHub/RepoName/...
+            # Captures 'RepoName'
+            github_pattern = re.compile(r'GitHub[\\/]([^\\/)\n]+)', re.IGNORECASE)
+            
+            check_files = ['task.md', 'walkthrough.md', 'implementation_plan.md']
+            
+            for fname in check_files:
+                fpath = brain_dir / fname
+                if fpath.exists():
+                    try:
+                        content = fpath.read_text(encoding='utf-8', errors='ignore')
+                        match = github_pattern.search(content)
+                        if match:
+                            return match.group(1).strip()
+                    except:
+                        pass
+
+            # Strategy 2: Fallback to Task Name (header in task.md)
+            task_file = brain_dir / 'task.md'
             if task_file.exists():
                 with open(task_file, 'r', encoding='utf-8') as f:
                     content = f.read()
-                    # Look for first heading (# Project Name)
                     for line in content.split('\n'):
                         line = line.strip()
+                        # Return the first header found
                         if line.startswith('# '):
-                            name = line[2:].strip()
-                            return name
+                            return line[2:].strip()
             
-            # Fallback: check implementation_plan.md
+             # Strategy 3: Implementation plan header
             plan_file = brain_dir / 'implementation_plan.md'
             if plan_file.exists():
-                with open(plan_file, 'r', encoding='utf-8') as f:
+                 with open(plan_file, 'r', encoding='utf-8') as f:
                     for line in f:
                         line = line.strip()
                         if line.startswith('# '):
-                            name = line[2:].strip()
-                            return name
+                            return line[2:].strip()
                             
         except Exception as e:
             print(f"Error getting project name: {e}")
