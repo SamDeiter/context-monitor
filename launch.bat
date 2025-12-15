@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-start "" "%LocalAppData%\Microsoft\WindowsApps\pythonw.exe" "context_monitor.py"
+powershell -ExecutionPolicy Bypass -File Launch-Monitor.ps1
 exit

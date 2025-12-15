@@ -320,7 +320,7 @@ class ContextMonitor:
              # Strategy 3: Implementation plan header
             plan_file = brain_dir / 'implementation_plan.md'
             if plan_file.exists():
-                 with open(plan_file, 'r', encoding='utf-8') as f:
+                with open(plan_file, 'r', encoding='utf-8') as f:
                     for line in f:
                         line = line.strip()
                         if line.startswith('# '):
