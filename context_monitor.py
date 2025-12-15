@@ -52,6 +52,10 @@ class ContextMonitor:
         self.flash_state = False
         self.current_percent = 0
         
+        # Project name cache
+        self.project_name_cache = {}
+        self.project_name_timestamp = {}
+        
         # Paths
         self.conversations_dir = Path.home() / '.gemini' / 'antigravity' / 'conversations'
         
@@ -211,6 +215,7 @@ class ContextMonitor:
         self.root.bind('<KeyPress-plus>', lambda e: self.adjust_alpha(0.05))
         self.root.bind('<KeyPress-minus>', lambda e: self.adjust_alpha(-0.05))
         self.root.bind('<KeyPress-r>', lambda e: self.reset_settings())
+        self.root.bind('<KeyPress-a>', lambda e: self.show_advanced_stats())
         
     def create_tooltip(self, widget, text):
         tooltip = ToolTip(widget, text, self.colors)
@@ -253,17 +258,23 @@ class ContextMonitor:
         pct_font_size = 22 if self.mini_mode else 14
         label_font_size = 7
         
-        # Drop shadow for mini mode (offset dark text behind)
+        # Enhanced text shadow/outline for mini mode (multi-layer for better readability)
         if self.mini_mode:
-            shadow_offset = 2
-            shadow_color = '#000000'
-            self.gauge_canvas.create_text(cx+shadow_offset, cy+shadow_offset, text=f"{percent}%", 
-                                          font=('Segoe UI', pct_font_size, 'bold'), fill=shadow_color, tags='text')
+            # Create outline effect with 8-directional shadow
+            outline_color = '#000000'
+            for offset_x, offset_y in [(0,-2), (0,2), (-2,0), (2,0), (-1,-1), (-1,1), (1,-1), (1,1)]:
+                self.gauge_canvas.create_text(cx+offset_x, cy+offset_y, text=f"{percent}%", 
+                                              font=('Segoe UI', pct_font_size, 'bold'), 
+                                              fill=outline_color, tags='text')
+            # Add semi-transparent background circle for extra contrast
+            bg_radius = 25
+            self.gauge_canvas.create_oval(cx-bg_radius, cy-bg_radius, cx+bg_radius, cy+bg_radius,
+                                         fill='#000000', outline='', tags='text', stipple='gray50')
         
         # Percentage text (centered in mini mode, offset in full mode)
         y_offset = 0 if self.mini_mode else -6
         self.gauge_canvas.create_text(cx, cy + y_offset, text=f"{percent}%", 
-                                      font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
+                                      font=('Segoe UI', pct_font_size, 'bold'), fill='#FFFFFF', tags='text')
         
         # Only show CONTEXT label in full mode
         if not self.mini_mode:
@@ -288,7 +299,16 @@ class ContextMonitor:
         return sessions
 
     def get_project_name(self, session_id):
-        """Extract project name from brain directory"""
+        """Extract project name from brain directory with caching"""
+        import time
+        
+        # Check cache first (cache for 60 seconds)
+        current_time = time.time()
+        if session_id in self.project_name_cache:
+            cache_age = current_time - self.project_name_timestamp.get(session_id, 0)
+            if cache_age < 60:
+                return self.project_name_cache[session_id]
+        
         try:
             brain_dir = Path.home() / '.gemini' / 'antigravity' / 'brain' / session_id
             
@@ -297,7 +317,7 @@ class ContextMonitor:
             import re
             # Pattern matches: .../Documents/GitHub/RepoName/...
             # Captures 'RepoName'
-            github_pattern = re.compile(r'GitHub[\\/]([^\\/)\n]+)', re.IGNORECASE)
+            github_pattern = re.compile(r'GitHub[\\/]([^\\/)\n\r]+)', re.IGNORECASE)
             
             # Check all markdown files, prioritizing specific ones
             priority_files = ['task.md', 'walkthrough.md', 'implementation_plan.md']
@@ -312,8 +332,13 @@ class ContextMonitor:
                         content = fpath.read_text(encoding='utf-8', errors='ignore')
                         match = github_pattern.search(content)
                         if match:
-                            return match.group(1).strip()
-                    except:
+                            project_name = match.group(1).strip()
+                            # Cache the result
+                            self.project_name_cache[session_id] = project_name
+                            self.project_name_timestamp[session_id] = current_time
+                            return project_name
+                    except Exception as e:
+                        print(f"Error reading {fpath.name}: {e}")
                         continue
             except Exception as e:
                 print(f"Error scanning md files: {e}")
@@ -321,28 +346,44 @@ class ContextMonitor:
             # Strategy 2: Fallback to Task Name (header in task.md)
             task_file = brain_dir / 'task.md'
             if task_file.exists():
-                with open(task_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    for line in content.split('\n'):
-                        line = line.strip()
-                        # Return the first header found
-                        if line.startswith('# '):
-                            return line[2:].strip()
+                try:
+                    with open(task_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        for line in content.split('\n'):
+                            line = line.strip()
+                            # Return the first header found
+                            if line.startswith('# '):
+                                project_name = line[2:].strip()
+                                self.project_name_cache[session_id] = project_name
+                                self.project_name_timestamp[session_id] = current_time
+                                return project_name
+                except Exception as e:
+                    print(f"Error reading task.md: {e}")
             
-             # Strategy 3: Implementation plan header
+            # Strategy 3: Implementation plan header
             plan_file = brain_dir / 'implementation_plan.md'
             if plan_file.exists():
-                with open(plan_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith('# '):
-                            return line[2:].strip()
+                try:
+                    with open(plan_file, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line.startswith('# '):
+                                project_name = line[2:].strip()
+                                self.project_name_cache[session_id] = project_name
+                                self.project_name_timestamp[session_id] = current_time
+                                return project_name
+                except Exception as e:
+                    print(f"Error reading implementation_plan.md: {e}")
                             
         except Exception as e:
             print(f"Error getting project name: {e}")
         
         # Final fallback: short session ID
-        return f"Session {session_id[:8]}"
+        fallback = f"Session {session_id[:8]}"
+        # Cache even the fallback to prevent repeated failures
+        self.project_name_cache[session_id] = fallback
+        self.project_name_timestamp[session_id] = current_time
+        return fallback
     
     def load_session(self):
         sessions = self.get_sessions()
@@ -548,6 +589,7 @@ Read those logs to understand what we were working on, then continue helping me.
         
         # Diagnostics section
         menu.add_command(label="  📊  Show Diagnostics", command=self.show_diagnostics)
+        menu.add_command(label="  📈  Advanced Token Stats", command=self.show_advanced_stats)
         menu.add_separator()
         
         # Actions section
@@ -725,6 +767,80 @@ Read those logs to understand what we were working on, then continue helping me.
                 subprocess.Popen([str(antigravity_path)], shell=True)
         except Exception as e:
             print(f"Error launching Antigravity: {e}")
+    
+    def show_advanced_stats(self):
+        """Show detailed token usage breakdown"""
+        if not self.current_session:
+            messagebox.showinfo("Advanced Stats", "No active session found.")
+            return
+        
+        try:
+            # Get conversation file
+            conv_file = self.conversations_dir / f"{self.current_session['id']}.pb"
+            if not conv_file.exists():
+                messagebox.showinfo("Advanced Stats", "Conversation file not found.")
+                return
+            
+            # Calculate token estimates
+            file_size = conv_file.stat().st_size
+            total_tokens = file_size // 4
+            
+            # Estimate breakdown (since we can't parse protobuf easily)
+            # Typical ratio is ~40% input, ~60% output
+            estimated_input = int(total_tokens * 0.4)
+            estimated_output = int(total_tokens * 0.6)
+            
+            context_window = 200000
+            tokens_used = self.current_session['estimated_tokens'] // 10
+            tokens_left = max(0, context_window - tokens_used)
+            percent_used = min(100, round((tokens_used / context_window) * 100))
+            
+            # Build detailed message
+            msg = "=== TOKEN USAGE BREAKDOWN ===\n\n"
+            msg += f"Context Window: {context_window:,} tokens\n"
+            msg += f"Tokens Used: {tokens_used:,} ({percent_used}%)\n"
+            msg += f"Tokens Remaining: {tokens_left:,}\n\n"
+            
+            msg += "=== ESTIMATED BREAKDOWN ===\n"
+            msg += f"Input Tokens (User): ~{estimated_input:,}\n"
+            msg += f"Output Tokens (Assistant): ~{estimated_output:,}\n\n"
+            
+            # Visual bar chart
+            msg += "=== USAGE VISUALIZATION ===\n"
+            bar_length = 40
+            used_bars = int((percent_used / 100) * bar_length)
+            remaining_bars = bar_length - used_bars
+            
+            if percent_used >= 80:
+                bar_color = "🔴"
+            elif percent_used >= 60:
+                bar_color = "🟡"
+            else:
+                bar_color = "🟢"
+            
+            msg += f"{bar_color} [{'█' * used_bars}{'░' * remaining_bars}] {percent_used}%\n\n"
+            
+            # File info
+            msg += "=== FILE INFORMATION ===\n"
+            msg += f"Conversation File: {conv_file.name}\n"
+            msg += f"File Size: {file_size / (1024*1024):.2f} MB\n"
+            msg += f"Session ID: {self.current_session['id'][:16]}...\n\n"
+            
+            # Recommendations
+            msg += "=== RECOMMENDATIONS ===\n"
+            if percent_used >= 80:
+                msg += "🔴 CRITICAL: Start a new session soon!\n"
+                msg += "   → Use 'Copy Handoff' to transition\n"
+            elif percent_used >= 60:
+                msg += "🟡 WARNING: Approaching context limit\n"
+                msg += "   → Plan to wrap up current task\n"
+            else:
+                msg += "✅ Context usage is healthy\n"
+            
+            messagebox.showinfo("Advanced Token Statistics", msg)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate stats: {e}")
 
 class ToolTip:
     def __init__(self, widget, text, colors):
