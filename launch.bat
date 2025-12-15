@@ -1,8 +1,4 @@
 @echo off
 cd /d "%~dp0"
-echo Launching Context Compass...
-node_modules\electron\dist\electron.exe .
-if errorlevel 1 (
-    echo Electron exited with error code %errorlevel%
-    pause
-)
+start "" "%LocalAppData%\Microsoft\WindowsApps\pythonw.exe" "context_monitor.py"
+exit

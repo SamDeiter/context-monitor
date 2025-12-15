@@ -506,43 +506,33 @@ Read those logs to understand what we were working on, then continue helping me.
             menu.grab_release()
     
     def get_antigravity_processes(self):
-        """Get memory/CPU usage of Antigravity processes with type info"""
+        """Get memory/CPU usage of Antigravity processes (Fast fallback)"""
+        # PowerShell/WMI is too slow on this user's machine (causing UI freeze)
+        # We will iterate processes using tasklist which is faster, or just return empty for speed
         try:
-            result = subprocess.run(
-                ['powershell', '-Command', 
-                 'Get-Process -Name Antigravity -ErrorAction SilentlyContinue | '
-                 'Select-Object Id, @{N="CPU";E={[math]::Round($_.CPU,1)}}, '
-                 '@{N="Mem";E={[math]::Round($_.WorkingSet64/1MB,0)}}, '
-                 '@{N="Cmd";E={(Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine}} | '
-                 'Sort-Object Mem -Descending | Select-Object -First 8 | '
-                 'ConvertTo-Json'],
-                capture_output=True, text=True, timeout=15
-            )
-            if result.stdout.strip():
-                data = json.loads(result.stdout)
-                if isinstance(data, dict):
-                    data = [data]
-                # Detect process type from command line
-                for p in data:
-                    cmd = p.get('Cmd', '') or ''
-                    if 'extensionHost' in cmd:
-                        p['Type'] = 'Extension Host'
-                    elif 'renderer' in cmd or 'gpu' in cmd:
-                        p['Type'] = 'Renderer/GPU'
-                    elif 'ptyHost' in cmd:
-                        p['Type'] = 'Terminal'
-                    elif 'fileWatcher' in cmd:
-                        p['Type'] = 'File Watcher'
-                    elif 'languageServer' in cmd or 'tsserver' in cmd:
-                        p['Type'] = 'Language Server'
-                    elif 'sharedProcess' in cmd:
-                        p['Type'] = 'Shared Process'
-                    else:
-                        p['Type'] = 'Main/Other'
-                return data
+             # Fast check using tasklist CSV format
+            cmd = 'tasklist /FI "IMAGENAME eq Antigravity.exe" /FO CSV /NH'
+            result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+            
+            data = []
+            if result.stdout:
+                for line in result.stdout.splitlines():
+                    if 'Antigravity' in line:
+                        parts = line.split('","')
+                        if len(parts) >= 5:
+                            pid = parts[1]
+                            mem_str = parts[4].replace('"', '').replace(' K', '').replace(',', '')
+                            mem_mb = int(mem_str) // 1024
+                            data.append({
+                                'Id': pid,
+                                'Type': 'Process', # Detailed type requires slow WMI
+                                'Mem': mem_mb,
+                                'CPU': 0 # CPU requires slow PerfCounters
+                            })
+            return data
         except Exception as e:
             print(f"Error getting processes: {e}")
-        return []
+            return []
     
     def get_large_conversations(self, min_size_mb=5):
         """Get conversation files larger than min_size_mb"""
