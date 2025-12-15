@@ -10,6 +10,8 @@ from datetime import datetime
 import json
 import subprocess
 import os
+import ctypes
+import platform
 
 class ContextMonitor:
     def __init__(self):
@@ -52,6 +54,10 @@ class ContextMonitor:
         
         # Paths
         self.conversations_dir = Path.home() / '.gemini' / 'antigravity' / 'conversations'
+        
+        # Hardware Scan
+        self.total_ram_mb = self.get_total_memory()
+        self.thresholds = self.calculate_thresholds()
         
         self.setup_ui()
         self.load_session()
@@ -293,18 +299,24 @@ class ContextMonitor:
             # Captures 'RepoName'
             github_pattern = re.compile(r'GitHub[\\/]([^\\/)\n]+)', re.IGNORECASE)
             
-            check_files = ['task.md', 'walkthrough.md', 'implementation_plan.md']
-            
-            for fname in check_files:
-                fpath = brain_dir / fname
-                if fpath.exists():
+            # Check all markdown files, prioritizing specific ones
+            priority_files = ['task.md', 'walkthrough.md', 'implementation_plan.md']
+            try:
+                # Get all md files
+                all_md_files = list(brain_dir.glob('*.md'))
+                # Sort: priority files first, then alphabetical
+                all_md_files.sort(key=lambda f: (0 if f.name in priority_files else 1, f.name))
+                
+                for fpath in all_md_files:
                     try:
                         content = fpath.read_text(encoding='utf-8', errors='ignore')
                         match = github_pattern.search(content)
                         if match:
                             return match.group(1).strip()
                     except:
-                        pass
+                        continue
+            except Exception as e:
+                print(f"Error scanning md files: {e}")
 
             # Strategy 2: Fallback to Task Name (header in task.md)
             task_file = brain_dir / 'task.md'
@@ -482,6 +494,44 @@ Read those logs to understand what we were working on, then continue helping me.
     
     def run(self):
         self.root.mainloop()
+        
+    def get_total_memory(self):
+        """Detect total system RAM in MB using ctypes"""
+        try:
+            if platform.system() == "Windows":
+                kernel32 = ctypes.windll.kernel32
+                c_ulonglong = ctypes.c_ulonglong
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ('dwLength', ctypes.c_ulong),
+                        ('dwMemoryLoad', ctypes.c_ulong),
+                        ('ullTotalPhys', c_ulonglong),
+                        ('ullAvailPhys', c_ulonglong),
+                        ('ullTotalPageFile', c_ulonglong),
+                        ('ullAvailPageFile', c_ulonglong),
+                        ('ullTotalVirtual', c_ulonglong),
+                        ('ullAvailVirtual', c_ulonglong),
+                        ('ullAvailExtendedVirtual', c_ulonglong),
+                    ]
+                memoryStatus = MEMORYSTATUSEX()
+                memoryStatus.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                kernel32.GlobalMemoryStatusEx(ctypes.byref(memoryStatus))
+                return int(memoryStatus.ullTotalPhys / (1024 * 1024))
+            else:
+                return 16384 # Fallback
+        except Exception as e:
+            print(f"Error detecting RAM: {e}")
+            return 16384
+            
+    def calculate_thresholds(self):
+        """Calculate warnings based on system RAM"""
+        ram = self.total_ram_mb
+        return {
+            'proc_warn': max(500, int(ram * 0.015)),  # 1.5% (approx 2GB for 128GB)
+            'proc_crit': max(1000, int(ram * 0.04)),  # 4% (approx 5GB for 128GB)
+            'total_warn': max(2000, int(ram * 0.10)), # 10% (approx 12GB for 128GB)
+            'total_crit': max(3000, int(ram * 0.15))  # 15% (approx 19GB for 128GB)
+        }
     
     # ==================== DIAGNOSTICS ====================
     
@@ -572,17 +622,19 @@ Read those logs to understand what we were working on, then continue helping me.
         
         # Build message
         msg = "=== ANTIGRAVITY PROCESSES ===\n"
+        msg += f"(System Logic: {self.total_ram_mb//1024}GB RAM detected)\n"
         total_mem = 0
         high_mem_types = []
+        limits = self.thresholds
         
         for p in procs:
             mem = p.get('Mem', 0)
             total_mem += mem
             cpu = p.get('CPU', 0)
             ptype = p.get('Type', 'Unknown')
-            status = "🔴" if mem > 500 else "🟡" if mem > 200 else "🟢"
+            status = "🔴" if mem > limits['proc_crit'] else "🟡" if mem > limits['proc_warn'] else "🟢"
             msg += f"{status} {ptype}: {mem}MB RAM, {cpu}s CPU\n"
-            if mem > 400:
+            if mem > limits['proc_warn']:
                 high_mem_types.append(ptype)
         
         msg += f"\nTotal: {total_mem}MB across {len(procs)} processes\n"
@@ -616,11 +668,11 @@ Read those logs to understand what we were working on, then continue helping me.
             msg += "⚠️ Large conversation files!\n"
             msg += "   → Use 'Clean Old Conversations'\n\n"
         
-        if total_mem > 3000:
-            msg += "🔴 CRITICAL: Total memory > 3GB!\n"
+        if total_mem > limits['total_crit']:
+            msg += f"🔴 CRITICAL: Total memory > {limits['total_crit']//1024}GB!\n"
             msg += "   → RESTART ANTIGRAVITY NOW\n"
-        elif total_mem > 2000:
-            msg += "🟡 High memory usage (>2GB)\n"
+        elif total_mem > limits['total_warn']:
+            msg += f"🟡 High memory usage (>{limits['total_warn']//1024}GB)\n"
             msg += "   → Consider restarting soon\n"
         elif not high_mem_types and total_size <= 50:
             msg += "✅ System looks healthy!\n"
@@ -680,27 +732,50 @@ class ToolTip:
         self.text = text
         self.colors = colors
         self.tooltip = None
-        self.widget.bind("<Enter>", self.enter)
-        self.widget.bind("<Leave>", self.leave)
+        self.id = None
+        self.widget.bind("<Enter>", self.schedule)
+        self.widget.bind("<Leave>", self.hide)
+        self.widget.bind("<ButtonPress>", self.hide)
 
-    def enter(self, event=None):
+    def schedule(self, event=None):
+        self.unschedule()
+        self.id = self.widget.after(500, self.show)
+
+    def unschedule(self):
+        if self.id:
+            self.widget.after_cancel(self.id)
+            self.id = None
+
+    def show(self, event=None):
+        if self.tooltip:
+            return
+            
         x, y, _, _ = self.widget.bbox("insert") if self.widget.bbox("insert") else (0, 0, 0, 0)
         x += self.widget.winfo_rootx() + 25
         y += self.widget.winfo_rooty() + 20
         
-        self.tooltip = tk.Toplevel(self.widget)
-        self.tooltip.wm_overrideredirect(True)
-        self.tooltip.wm_geometry(f"+{x}+{y}")
-        
-        label = tk.Label(self.tooltip, text=self.text, justify='left',
-                       bg=self.colors['bg3'], fg=self.colors['text'],
-                       relief='solid', borderwidth=1,
-                       font=("Segoe UI", 8))
-        label.pack()
+        # Prevent tooltip from being created if widget is not visible
+        try:
+            self.tooltip = tk.Toplevel(self.widget)
+            self.tooltip.wm_overrideredirect(True)
+            self.tooltip.wm_geometry(f"+{x}+{y}")
+            self.tooltip.attributes('-topmost', True)
+            
+            label = tk.Label(self.tooltip, text=self.text, justify='left',
+                           bg=self.colors['bg3'], fg=self.colors['text'],
+                           relief='solid', borderwidth=1,
+                           font=("Segoe UI", 8))
+            label.pack()
+        except:
+            self.hide()
 
-    def leave(self, event=None):
+    def hide(self, event=None):
+        self.unschedule()
         if self.tooltip:
-            self.tooltip.destroy()
+            try:
+                self.tooltip.destroy()
+            except:
+                pass
             self.tooltip = None
 
 if __name__ == '__main__':
