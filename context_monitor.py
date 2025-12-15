@@ -49,6 +49,7 @@ class ContextMonitor:
         self.current_session = None
         self.handoff_copied = False
         self.mini_mode = self.settings.get('mini_mode', False)
+        self.advanced_mode = self.settings.get('advanced_mode', False)
         self.flash_state = False
         self.current_percent = 0
         
@@ -110,7 +111,9 @@ class ContextMonitor:
         else:
             # Full mode - reset transparency
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"280x200+{x_pos}+{y_pos}")
+            # Adjust height based on advanced mode
+            height = 280 if self.advanced_mode else 200
+            self.root.geometry(f"280x{height}+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -133,6 +136,13 @@ class ContextMonitor:
             tk.Label(alpha_frame, text="+", font=('Segoe UI', 10), cursor='hand2',
                     bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
             alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(0.05))
+            
+            # Advanced mode toggle
+            adv_icon = "📊" if not self.advanced_mode else "📉"
+            adv_btn = tk.Label(header, text=adv_icon, font=('Segoe UI', 10), cursor='hand2',
+                              bg=self.colors['bg3'], fg=self.colors['blue'])
+            adv_btn.pack(side='right', padx=5)
+            adv_btn.bind('<Button-1>', lambda e: self.toggle_advanced_mode())
             
             # Mini mode toggle
             mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
@@ -186,6 +196,61 @@ class ContextMonitor:
             self.session_label.pack(anchor='w')
             self.session_label.bind('<Button-3>', self.show_context_menu)
             
+            # Advanced stats section (only shown when advanced_mode is True)
+            if self.advanced_mode:
+                # Separator
+                tk.Frame(content, bg=self.colors['muted'], height=1).pack(fill='x', pady=(8, 8))
+                
+                # Advanced breakdown with mini gauges
+                adv_row = tk.Frame(content, bg=self.colors['bg2'])
+                adv_row.pack(fill='x')
+                adv_row.bind('<Button-3>', self.show_context_menu)
+                
+                # Input tokens gauge
+                input_col = tk.Frame(adv_row, bg=self.colors['bg2'])
+                input_col.pack(side='left', expand=True, fill='both')
+                
+                self.input_canvas = tk.Canvas(input_col, width=50, height=50,
+                                             bg=self.colors['bg2'], highlightthickness=0)
+                self.input_canvas.pack(pady=(0, 4))
+                self.input_canvas.bind('<Button-3>', self.show_context_menu)
+                
+                tk.Label(input_col, text="INPUT", font=('Segoe UI', 7),
+                        bg=self.colors['bg2'], fg=self.colors['muted']).pack()
+                self.input_label = tk.Label(input_col, text="—", font=('Segoe UI', 8, 'bold'),
+                                           bg=self.colors['bg2'], fg=self.colors['text'])
+                self.input_label.pack()
+                
+                # Output tokens gauge
+                output_col = tk.Frame(adv_row, bg=self.colors['bg2'])
+                output_col.pack(side='left', expand=True, fill='both')
+                
+                self.output_canvas = tk.Canvas(output_col, width=50, height=50,
+                                              bg=self.colors['bg2'], highlightthickness=0)
+                self.output_canvas.pack(pady=(0, 4))
+                self.output_canvas.bind('<Button-3>', self.show_context_menu)
+                
+                tk.Label(output_col, text="OUTPUT", font=('Segoe UI', 7),
+                        bg=self.colors['bg2'], fg=self.colors['muted']).pack()
+                self.output_label = tk.Label(output_col, text="—", font=('Segoe UI', 8, 'bold'),
+                                            bg=self.colors['bg2'], fg=self.colors['text'])
+                self.output_label.pack()
+                
+                # File size info
+                file_col = tk.Frame(adv_row, bg=self.colors['bg2'])
+                file_col.pack(side='left', expand=True, fill='both')
+                
+                self.file_canvas = tk.Canvas(file_col, width=50, height=50,
+                                            bg=self.colors['bg2'], highlightthickness=0)
+                self.file_canvas.pack(pady=(0, 4))
+                self.file_canvas.bind('<Button-3>', self.show_context_menu)
+                
+                tk.Label(file_col, text="FILE SIZE", font=('Segoe UI', 7),
+                        bg=self.colors['bg2'], fg=self.colors['muted']).pack()
+                self.file_label = tk.Label(file_col, text="—", font=('Segoe UI', 8, 'bold'),
+                                          bg=self.colors['bg2'], fg=self.colors['text'])
+                self.file_label.pack()
+            
             # Status bar with copy button
             self.status_frame = tk.Frame(content, bg=self.colors['bg3'], padx=8, pady=6)
             self.status_frame.pack(fill='x', pady=(10, 0))
@@ -204,18 +269,22 @@ class ContextMonitor:
             self.copy_btn.bind('<Button-1>', lambda e: self.copy_handoff())
             
             # Tooltips (full mode only)
-            self.create_tooltip(self.gauge_canvas, "Token Usage\nGreen: Safe\nYellow: < 60% Left\nRed: < 80% Left")
-            self.create_tooltip(self.copy_btn, "Generate Handoff\nCreates a summary prompt for the next agent")
-            self.create_tooltip(self.session_label, "Current Session ID\nAuto-detected from files")
-            self.create_tooltip(mini_btn, "Toggle Mini Mode (M)\nSwitch to compact view")
-            self.create_tooltip(alpha_frame, "Transparency (+/-)\nAdjust window opacity")
+            self.create_tooltip(self.gauge_canvas, "Token Usage\\nGreen: Safe\\nYellow: < 60% Left\\nRed: < 80% Left")
+            self.create_tooltip(adv_btn, "Toggle Advanced Mode\\nShow detailed token breakdown")
+            self.create_tooltip(self.copy_btn, "Generate Handoff\\nCreates a summary prompt for the next agent")
+            self.create_tooltip(self.session_label, "Current Session ID\\nAuto-detected from files")
+            self.create_tooltip(mini_btn, "Toggle Mini Mode (M)\\nSwitch to compact view")
+            self.create_tooltip(alpha_frame, "Transparency (+/-)\\nAdjust window opacity")
         
         # Keyboard shortcuts (global)
         self.root.bind('<KeyPress-m>', lambda e: self.toggle_mini_mode())
+        self.root.bind('<KeyPress-M>', lambda e: self.toggle_mini_mode())
         self.root.bind('<KeyPress-plus>', lambda e: self.adjust_alpha(0.05))
         self.root.bind('<KeyPress-minus>', lambda e: self.adjust_alpha(-0.05))
         self.root.bind('<KeyPress-r>', lambda e: self.reset_settings())
+        self.root.bind('<KeyPress-R>', lambda e: self.reset_settings())
         self.root.bind('<KeyPress-a>', lambda e: self.show_advanced_stats())
+        self.root.bind('<KeyPress-A>', lambda e: self.show_advanced_stats())
         
     def create_tooltip(self, widget, text):
         tooltip = ToolTip(widget, text, self.colors)
@@ -280,6 +349,29 @@ class ContextMonitor:
         if not self.mini_mode:
             self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
                                           font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
+    
+    def draw_mini_gauge(self, canvas, percent, color):
+        """Draw a small circular gauge for advanced stats"""
+        canvas.delete('all')
+        
+        width = canvas.winfo_reqwidth()
+        cx, cy = width // 2, width // 2
+        r = (width // 2) - 8
+        arc_width = 4
+        
+        # Background arc
+        canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-360,
+                         style='arc', outline=self.colors['bg3'], width=arc_width)
+        
+        # Filled arc
+        if percent > 0:
+            canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, 
+                             extent=-360*(percent/100),
+                             style='arc', outline=color, width=arc_width)
+        
+        # Center percentage
+        canvas.create_text(cx, cy, text=f"{percent}%", 
+                          font=('Segoe UI', 9, 'bold'), fill=self.colors['text'])
         
     def get_sessions(self):
         sessions = []
@@ -408,6 +500,25 @@ class ContextMonitor:
             project_name = self.get_project_name(self.current_session['id'])
             self.session_label.config(text=project_name)
             
+            # Update advanced stats if in advanced mode
+            if self.advanced_mode and hasattr(self, 'input_label'):
+                file_size = self.current_session['size']
+                total_tokens = file_size // 4
+                estimated_input = int(total_tokens * 0.4)
+                estimated_output = int(total_tokens * 0.6)
+                
+                # Update labels
+                self.input_label.config(text=f"{estimated_input//1000}K")
+                self.output_label.config(text=f"{estimated_output//1000}K")
+                self.file_label.config(text=f"{file_size / (1024*1024):.1f}MB")
+                
+                # Draw mini gauges
+                self.draw_mini_gauge(self.input_canvas, 40, self.colors['blue'])
+                self.draw_mini_gauge(self.output_canvas, 60, self.colors['green'])
+                # File size as percentage of typical max (50MB)
+                file_percent = min(100, int((file_size / (50 * 1024 * 1024)) * 100))
+                self.draw_mini_gauge(self.file_canvas, file_percent, self.colors['yellow'])
+            
             # Update status and auto-copy at 80%
             if percent >= 80:
                 self.status_label.config(text="🔴 Handoff copied!", fg=self.colors['red'])
@@ -480,7 +591,8 @@ Read those logs to understand what we were working on, then continue helping me.
             with open(self.settings_file, 'w') as f:
                 json.dump({
                     'alpha': self.root.attributes('-alpha'),
-                    'mini_mode': self.mini_mode
+                    'mini_mode': self.mini_mode,
+                    'advanced_mode': self.advanced_mode
                 }, f, indent=2)
         except Exception as e:
             print(f"Error saving settings: {e}")
@@ -488,6 +600,13 @@ Read those logs to understand what we were working on, then continue helping me.
     def toggle_mini_mode(self):
         """Toggle between full and mini mode"""
         self.mini_mode = not self.mini_mode
+        self.save_settings()
+        self.setup_ui()
+        self.load_session()
+    
+    def toggle_advanced_mode(self):
+        """Toggle advanced mode to show/hide detailed stats"""
+        self.advanced_mode = not self.advanced_mode
         self.save_settings()
         self.setup_ui()
         self.load_session()
