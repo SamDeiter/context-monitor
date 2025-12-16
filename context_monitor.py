@@ -437,28 +437,32 @@ class ContextMonitor:
                                               fill=color, tags='text', anchor=anchor)
             # 1. Input (Blue) - Right side, top position
             import math
-            # Text position on right side
-            text_x, text_y = 175, 65
-            # Calculate angle from center to text position
-            angle = math.atan2(text_y - 100, text_x - 100)
-            # Point on ring where line starts
-            x_start = 100 + r_in * math.cos(angle)
-            y_start = 100 + r_in * math.sin(angle)
-            draw_stat_label(x_start, y_start, text_x, text_y, f"IN:{estimated_input//1000}K", col_input, 'w')
+            text_x, text_y = 175, 60
+            # Calculate x position on ring at this y-coordinate
+            # Circle equation: (x - cx)² + (y - cy)² = r²
+            # Solve for x: x = cx + sqrt(r² - (y - cy)²)
+            dy = text_y - 100
+            if abs(dy) < r_in:  # Ensure point exists on circle
+                dx = math.sqrt(r_in**2 - dy**2)
+                x_start = 100 + dx  # Right side of circle
+                y_start = text_y
+                draw_stat_label(x_start, y_start, text_x, text_y, f"IN:{estimated_input//1000}K", col_input, 'w')
             
-            # 2. Output (Purple) - Right side, middle position
+            # 2. Output (Purple) - Right side, middle position  
             text_x, text_y = 175, 100
-            angle = math.atan2(text_y - 100, text_x - 100)
-            x_start = 100 + r_out * math.cos(angle)
-            y_start = 100 + r_out * math.sin(angle)
+            # At y = center, the rightmost point is simply cx + radius
+            x_start = 100 + r_out
+            y_start = 100
             draw_stat_label(x_start, y_start, text_x, text_y, f"OUT:{estimated_output//1000}K", col_output, 'w')
             
             # 3. File (Cyan) - Right side, bottom position
-            text_x, text_y = 175, 135
-            angle = math.atan2(text_y - 100, text_x - 100)
-            x_start = 100 + r_file * math.cos(angle)
-            y_start = 100 + r_file * math.sin(angle)
-            draw_stat_label(x_start, y_start, text_x, text_y, f"{file_size / (1024*1024):.2f}MB", col_file, 'w')
+            text_x, text_y = 175, 140
+            dy = text_y - 100
+            if abs(dy) < r_file:
+                dx = math.sqrt(r_file**2 - dy**2)
+                x_start = 100 + dx
+                y_start = text_y
+                draw_stat_label(x_start, y_start, text_x, text_y, f"{file_size / (1024*1024):.2f}MB", col_file, 'w')
     
     def draw_mini_gauge(self, canvas, percent, color):
         """Draw a small circular gauge for advanced stats"""
