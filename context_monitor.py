@@ -84,7 +84,7 @@ class ContextMonitor:
         
         if self.mini_mode:
             # Mini mode: circular gauge with stats
-            size = 160 if self.advanced_mode else 120
+            size = 200 if self.advanced_mode else 120
             self.root.geometry(f"{size}x{size}+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
@@ -93,7 +93,7 @@ class ContextMonitor:
             self.root.configure(bg=trans_color)
             self.root.attributes('-transparentcolor', trans_color)
             
-            size = 160 if self.advanced_mode else 120
+            size = 200 if self.advanced_mode else 120
             self.gauge_canvas = tk.Canvas(self.root, width=size, height=size,
                                           bg=trans_color, highlightthickness=0)
             self.gauge_canvas.pack()
@@ -101,7 +101,7 @@ class ContextMonitor:
             # Draw circular background
             if self.advanced_mode:
                 # Larger circle for advanced mode
-                self.gauge_canvas.create_oval(10, 10, 150, 150, fill=self.colors['bg'], outline='')
+                self.gauge_canvas.create_oval(10, 10, 190, 190, fill=self.colors['bg'], outline='')
             else:
                 self.gauge_canvas.create_oval(10, 10, 110, 110, fill=self.colors['bg'], outline='')
             
@@ -316,7 +316,7 @@ class ContextMonitor:
         if self.mini_mode:
             # Center within the visible circle
             if self.advanced_mode:
-                cx, cy = 80, 80
+                cx, cy = 100, 100
                 # Main context gauge (Inner)
                 r = 35 
                 arc_width = 8
@@ -359,7 +359,7 @@ class ContextMonitor:
             col_file = '#39c5cf'    # Cyan
             
             # Adjust radii for spacing (Cleaner tracks)
-            cx, cy = 80, 80
+            cx, cy = 100, 100
             r_in = 39    # Input (Inner)
             r_out = 49   # Output (Middle) - Wider gap
             r_file = 59  # File (Outer)
@@ -428,27 +428,26 @@ class ContextMonitor:
                  self.gauge_canvas.create_text(x_end, y_end - (5 if y_end < y_start else -5), 
                                               text=text, font=('Segoe UI', stats_font_size, 'bold'), 
                                               fill=color, tags='text', anchor=anchor)
-
             # 1. Input (Blue) - Top Center
             # Line from r_in (Top) up
-            draw_stat_label(80, 80-r_in-2, 80, 15, f"IN:{estimated_input//1000}K", col_input, 's')
+            draw_stat_label(100, 100-r_in-2, 100, 25, f"IN:{estimated_input//1000}K", col_input, 's')
             
             # 2. Output (Purple) - Bottom Right (Angle 45)
             # Line from r_out radiating out
             import math
             angle_rad = math.radians(45)
-            x_start = 80 + r_out * math.cos(angle_rad)
-            y_start = 80 + r_out * math.sin(angle_rad)
-            x_end = 80 + (r_out + 15) * math.cos(angle_rad)
-            y_end = 80 + (r_out + 15) * math.sin(angle_rad)
+            x_start = 100 + r_out * math.cos(angle_rad)
+            y_start = 100 + r_out * math.sin(angle_rad)
+            x_end = 100 + (r_out + 25) * math.cos(angle_rad)
+            y_end = 100 + (r_out + 25) * math.sin(angle_rad)
             draw_stat_label(x_start, y_start, x_end, y_end, f"OUT:{estimated_output//1000}K", col_output, 'nw')
             
             # 3. File (Cyan) - Bottom Left (Angle 135)
             angle_rad = math.radians(135)
-            x_start = 80 + r_file * math.cos(angle_rad)
-            y_start = 80 + r_file * math.sin(angle_rad)
-            x_end = 80 + (r_file + 15) * math.cos(angle_rad)
-            y_end = 80 + (r_file + 15) * math.sin(angle_rad)
+            x_start = 100 + r_file * math.cos(angle_rad)
+            y_start = 100 + r_file * math.sin(angle_rad)
+            x_end = 100 + (r_file + 25) * math.cos(angle_rad)
+            y_end = 100 + (r_file + 25) * math.sin(angle_rad)
             draw_stat_label(x_start, y_start, x_end, y_end, f"{file_size / (1024*1024):.2f}MB", col_file, 'ne')
     
     def draw_mini_gauge(self, canvas, percent, color):
