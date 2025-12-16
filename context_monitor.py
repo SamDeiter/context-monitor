@@ -429,33 +429,36 @@ class ContextMonitor:
                  self.gauge_canvas.create_line(x_start, y_start, x_end, y_end, fill=color, width=2, tags='text')
                  # Text with subtle shadow for depth
                  shadow_offset = 1
-                 self.gauge_canvas.create_text(x_end + shadow_offset, y_end - (5 if y_end < y_start else -5) + shadow_offset, 
+                 self.gauge_canvas.create_text(x_end + shadow_offset, y_end + shadow_offset, 
                                               text=text, font=('Segoe UI', stats_font_size, 'bold'), 
                                               fill='#000000', tags='text', anchor=anchor)
-                 self.gauge_canvas.create_text(x_end, y_end - (5 if y_end < y_start else -5), 
+                 self.gauge_canvas.create_text(x_end, y_end, 
                                               text=text, font=('Segoe UI', stats_font_size, 'bold'), 
                                               fill=color, tags='text', anchor=anchor)
-            # 1. Input (Blue) - Top Center
-            # Line from r_in (Top) up
-            draw_stat_label(100, 100-r_in-2, 100, 25, f"IN:{estimated_input//1000}K", col_input, 's')
-            
-            # 2. Output (Purple) - Bottom Right (Angle 45)
-            # Line from r_out radiating out
+            # 1. Input (Blue) - Right side, top position
             import math
-            angle_rad = math.radians(45)
-            x_start = 100 + r_out * math.cos(angle_rad)
-            y_start = 100 + r_out * math.sin(angle_rad)
-            x_end = 100 + (r_out + 25) * math.cos(angle_rad)
-            y_end = 100 + (r_out + 25) * math.sin(angle_rad)
-            draw_stat_label(x_start, y_start, x_end, y_end, f"OUT:{estimated_output//1000}K", col_output, 'nw')
+            # Text position on right side
+            text_x, text_y = 175, 65
+            # Calculate angle from center to text position
+            angle = math.atan2(text_y - 100, text_x - 100)
+            # Point on ring where line starts
+            x_start = 100 + r_in * math.cos(angle)
+            y_start = 100 + r_in * math.sin(angle)
+            draw_stat_label(x_start, y_start, text_x, text_y, f"IN:{estimated_input//1000}K", col_input, 'w')
             
-            # 3. File (Cyan) - Bottom Left (Angle 135)
-            angle_rad = math.radians(135)
-            x_start = 100 + r_file * math.cos(angle_rad)
-            y_start = 100 + r_file * math.sin(angle_rad)
-            x_end = 100 + (r_file + 25) * math.cos(angle_rad)
-            y_end = 100 + (r_file + 25) * math.sin(angle_rad)
-            draw_stat_label(x_start, y_start, x_end, y_end, f"{file_size / (1024*1024):.2f}MB", col_file, 'ne')
+            # 2. Output (Purple) - Right side, middle position
+            text_x, text_y = 175, 100
+            angle = math.atan2(text_y - 100, text_x - 100)
+            x_start = 100 + r_out * math.cos(angle)
+            y_start = 100 + r_out * math.sin(angle)
+            draw_stat_label(x_start, y_start, text_x, text_y, f"OUT:{estimated_output//1000}K", col_output, 'w')
+            
+            # 3. File (Cyan) - Right side, bottom position
+            text_x, text_y = 175, 135
+            angle = math.atan2(text_y - 100, text_x - 100)
+            x_start = 100 + r_file * math.cos(angle)
+            y_start = 100 + r_file * math.sin(angle)
+            draw_stat_label(x_start, y_start, text_x, text_y, f"{file_size / (1024*1024):.2f}MB", col_file, 'w')
     
     def draw_mini_gauge(self, canvas, percent, color):
         """Draw a small circular gauge for advanced stats"""
