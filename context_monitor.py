@@ -82,8 +82,9 @@ class ContextMonitor:
         y_pos = pos[2] if len(pos) > 2 else "50"
         
         if self.mini_mode:
-            # Mini mode: circular gauge
-            self.root.geometry(f"120x120+{x_pos}+{y_pos}")
+            # Mini mode: circular gauge with stats
+            size = 160 if self.advanced_mode else 120
+            self.root.geometry(f"{size}x{size}+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Use transparent color to create circular appearance
@@ -91,12 +92,17 @@ class ContextMonitor:
             self.root.configure(bg=trans_color)
             self.root.attributes('-transparentcolor', trans_color)
             
-            self.gauge_canvas = tk.Canvas(self.root, width=120, height=120,
+            size = 160 if self.advanced_mode else 120
+            self.gauge_canvas = tk.Canvas(self.root, width=size, height=size,
                                           bg=trans_color, highlightthickness=0)
             self.gauge_canvas.pack()
             
             # Draw circular background
-            self.gauge_canvas.create_oval(10, 10, 110, 110, fill=self.colors['bg'], outline='')
+            if self.advanced_mode:
+                # Larger circle for advanced mode
+                self.gauge_canvas.create_oval(10, 10, 150, 150, fill=self.colors['bg'], outline='')
+            else:
+                self.gauge_canvas.create_oval(10, 10, 110, 110, fill=self.colors['bg'], outline='')
             
             self.draw_gauge(self.current_percent)
             
@@ -301,15 +307,22 @@ class ContextMonitor:
         width = self.gauge_canvas.winfo_reqwidth()
         
         if self.mini_mode:
-            # Center within the visible circle (which is at 10,10 to 110,110)
-            cx, cy = 60, 60
-            r = 35
-            arc_width = 8
+            # Center within the visible circle
+            if self.advanced_mode:
+                cx, cy = 80, 80
+                # Main context gauge (Inner)
+                r = 35 
+                arc_width = 8
+            else:
+                cx, cy = 60, 60
+                r = 35
+                arc_width = 8
         else:
             cx, cy = width // 2, width // 2
             r = (width // 2) - 12
             arc_width = 6
         
+        # Draw Main Context Gauge
         self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-360,
                                      style='arc', outline=self.colors['bg3'], width=arc_width, tags='arc')
         
@@ -323,11 +336,54 @@ class ContextMonitor:
                                          extent=-360*(percent/100),
                                          style='arc', outline=color, width=arc_width, tags='arc')
         
+        # Advanced Mode: Draw Concentric Rings for Input, Output, File Size
+        if self.mini_mode and self.advanced_mode and self.current_session:
+            file_size = self.current_session.get('size', 0)
+            total_tokens = file_size // 4
+            estimated_input = int(total_tokens * 0.4)
+            estimated_output = int(total_tokens * 0.6)
+            
+            # Context window for normalization
+            context_window = 200000
+            
+            # Colors for stats (Distinct from Green/Yellow/Red of main gauge)
+            col_input = '#58a6ff'   # Blue
+            col_output = '#bc8cff'  # Purple
+            col_file = '#39c5cf'    # Cyan
+            
+            # 1. Input Gauge (Inner Ring) - Blue
+            r_in = 48
+            pct_in = min(1.0, estimated_input / context_window)
+            self.gauge_canvas.create_arc(cx-r_in, cy-r_in, cx+r_in, cy+r_in, start=90, extent=-360,
+                                         style='arc', outline='#101418', width=6, tags='stats_arc')
+            if pct_in > 0:
+                self.gauge_canvas.create_arc(cx-r_in, cy-r_in, cx+r_in, cy+r_in, start=90, extent=-360*pct_in,
+                                             style='arc', outline=col_input, width=6, tags='stats_arc')
+            
+            # 2. Output Gauge (Middle Ring) - Purple
+            r_out = 58
+            pct_out = min(1.0, estimated_output / context_window)
+            self.gauge_canvas.create_arc(cx-r_out, cy-r_out, cx+r_out, cy+r_out, start=90, extent=-360,
+                                         style='arc', outline='#101418', width=6, tags='stats_arc')
+            if pct_out > 0:
+                self.gauge_canvas.create_arc(cx-r_out, cy-r_out, cx+r_out, cy+r_out, start=90, extent=-360*pct_out,
+                                             style='arc', outline=col_output, width=6, tags='stats_arc')
+                                             
+            # 3. File Size (Outer Ring) - Cyan
+            r_file = 68
+            # Normalize file size to 50MB
+            pct_file = min(1.0, file_size / (50 * 1024 * 1024))
+            self.gauge_canvas.create_arc(cx-r_file, cy-r_file, cx+r_file, cy+r_file, start=90, extent=-360,
+                                         style='arc', outline='#101418', width=6, tags='stats_arc')
+            if pct_file > 0:
+                self.gauge_canvas.create_arc(cx-r_file, cy-r_file, cx+r_file, cy+r_file, start=90, extent=-360*pct_file,
+                                             style='arc', outline=col_file, width=6, tags='stats_arc')
+        
         # Font sizes
         pct_font_size = 22 if self.mini_mode else 14
         label_font_size = 7
         
-        # Enhanced text shadow/outline for mini mode (multi-layer for better readability)
+        # Enhanced text shadow/outline for mini mode
         if self.mini_mode:
             # Create outline effect with 8-directional shadow
             outline_color = '#000000'
@@ -343,12 +399,32 @@ class ContextMonitor:
         # Percentage text (centered in mini mode, offset in full mode)
         y_offset = 0 if self.mini_mode else -6
         self.gauge_canvas.create_text(cx, cy + y_offset, text=f"{percent}%", 
-                                      font=('Segoe UI', pct_font_size, 'bold'), fill='#FFFFFF', tags='text')
+                                      font=('Segoe UI', pct_font_size, 'bold'), fill='#FFFFFF' if self.mini_mode else self.colors['text'], tags='text')
         
         # Only show CONTEXT label in full mode
         if not self.mini_mode:
             self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
                                           font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
+        
+        # Show advanced stats labels in mini mode if enabled (updated positions)
+        if self.mini_mode and self.advanced_mode and self.current_session:
+             # Reposition labels to align EXACTLY with their rings
+            stats_font_size = 7
+            
+            # 1. Input (Blue, Inner Ring r=48) - Top
+            self.gauge_canvas.create_text(80, 22, text=f"IN:{estimated_input//1000}K", 
+                                         font=('Segoe UI', stats_font_size, 'bold'), 
+                                         fill=col_input, tags='text')
+            
+            # 2. Output (Purple, Middle Ring r=58) - Bottom Right
+            self.gauge_canvas.create_text(130, 115, text=f"OUT:{estimated_output//1000}K", 
+                                         font=('Segoe UI', stats_font_size, 'bold'), 
+                                         fill=col_output, tags='text')
+            
+            # 3. File (Cyan, Outer Ring r=68) - Bottom Left
+            self.gauge_canvas.create_text(30, 115, text=f"{file_size / (1024*1024):.2f}MB", 
+                                         font=('Segoe UI', stats_font_size, 'bold'), 
+                                         fill=col_file, tags='text')
     
     def draw_mini_gauge(self, canvas, percent, color):
         """Draw a small circular gauge for advanced stats"""
