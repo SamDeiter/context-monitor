@@ -148,19 +148,19 @@ class ContextMonitor:
             adv_icon = "📊" if not self.advanced_mode else "📉"
             adv_btn = tk.Label(header, text=adv_icon, font=('Segoe UI', 10), cursor='hand2',
                               bg=self.colors['bg3'], fg=self.colors['blue'])
-            adv_btn.pack(side='right', padx=5)
+            adv_btn.pack(side='right', padx=8)
             adv_btn.bind('<Button-1>', lambda e: self.toggle_advanced_mode())
             
             # Restart button
             restart_btn = tk.Label(header, text="🔄", font=('Segoe UI', 10), cursor='hand2',
-                                  bg=self.colors['bg3'], fg=self.colors['text2'])
-            restart_btn.pack(side='right', padx=2)
+                                  bg=self.colors['bg3'], fg=self.colors['blue'])
+            restart_btn.pack(side='right', padx=8)
             restart_btn.bind('<Button-1>', lambda e: self.restart_app())
             
             # Mini mode toggle
             mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
                                bg=self.colors['bg3'], fg=self.colors['blue'])
-            mini_btn.pack(side='right', padx=5)
+            mini_btn.pack(side='right', padx=8)
             mini_btn.bind('<Button-1>', lambda e: self.toggle_mini_mode())
             
             close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
@@ -319,7 +319,7 @@ class ContextMonitor:
                 cx, cy = 100, 100
                 # Main context gauge (Inner)
                 r = 35 
-                arc_width = 8
+                arc_width = 10
             else:
                 cx, cy = 60, 60
                 r = 35
@@ -364,7 +364,7 @@ class ContextMonitor:
             r_out = 49   # Output (Middle) - Wider gap
             r_file = 59  # File (Outer)
             
-            width_r = 4  # Slightly thinner rings
+            width_r = 5  # Optimized ring width for visibility
             
             # 1. Input Gauge (Inner Ring) - Blue
             pct_in = min(1.0, estimated_input / context_window)
@@ -420,11 +420,18 @@ class ContextMonitor:
         
         # Show advanced stats labels in mini mode with LEADER LINES
         if self.mini_mode and self.advanced_mode and self.current_session:
-            stats_font_size = 8
+            stats_font_size = 9
             
             # Helper to draw leader line and text
             def draw_stat_label(x_start, y_start, x_end, y_end, text, color, anchor='center'):
-                 self.gauge_canvas.create_line(x_start, y_start, x_end, y_end, fill=color, width=1, tags='text')
+                 # Enhanced leader line with slight glow
+                 self.gauge_canvas.create_line(x_start, y_start, x_end, y_end, fill='#000000', width=3, tags='text')
+                 self.gauge_canvas.create_line(x_start, y_start, x_end, y_end, fill=color, width=2, tags='text')
+                 # Text with subtle shadow for depth
+                 shadow_offset = 1
+                 self.gauge_canvas.create_text(x_end + shadow_offset, y_end - (5 if y_end < y_start else -5) + shadow_offset, 
+                                              text=text, font=('Segoe UI', stats_font_size, 'bold'), 
+                                              fill='#000000', tags='text', anchor=anchor)
                  self.gauge_canvas.create_text(x_end, y_end - (5 if y_end < y_start else -5), 
                                               text=text, font=('Segoe UI', stats_font_size, 'bold'), 
                                               fill=color, tags='text', anchor=anchor)
