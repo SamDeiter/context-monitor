@@ -435,34 +435,33 @@ class ContextMonitor:
                  self.gauge_canvas.create_text(x_end, y_end, 
                                               text=text, font=('Segoe UI', stats_font_size, 'bold'), 
                                               fill=color, tags='text', anchor=anchor)
-            # 1. Input (Blue) - Right side, top position
+            # Layout: Labels on RIGHT side with horizontal leader lines from ring edges
             import math
-            text_x, text_y = 175, 60
-            # Calculate x position on ring at this y-coordinate
-            # Circle equation: (x - cx)² + (y - cy)² = r²
-            # Solve for x: x = cx + sqrt(r² - (y - cy)²)
-            dy = text_y - 100
-            if abs(dy) < r_in:  # Ensure point exists on circle
-                dx = math.sqrt(r_in**2 - dy**2)
-                x_start = 100 + dx  # Right side of circle
-                y_start = text_y
-                draw_stat_label(x_start, y_start, text_x, text_y, f"IN:{estimated_input//1000}K", col_input, 'w')
             
-            # 2. Output (Purple) - Right side, middle position  
-            text_x, text_y = 175, 100
-            # At y = center, the rightmost point is simply cx + radius
-            x_start = 100 + r_out
-            y_start = 100
-            draw_stat_label(x_start, y_start, text_x, text_y, f"OUT:{estimated_output//1000}K", col_output, 'w')
+            # Vertical spacing for labels (evenly distributed on right)
+            label_positions = [
+                (r_in, 70, col_input, f"IN:{estimated_input//1000}K"),      # Inner ring (Blue)
+                (r_out, 100, col_output, f"OUT:{estimated_output//1000}K"), # Middle ring (Purple)
+                (r_file, 130, col_file, f"{file_size/(1024*1024):.2f}MB")   # Outer ring (Cyan)
+            ]
             
-            # 3. File (Cyan) - Right side, bottom position
-            text_x, text_y = 175, 140
-            dy = text_y - 100
-            if abs(dy) < r_file:
-                dx = math.sqrt(r_file**2 - dy**2)
-                x_start = 100 + dx
-                y_start = text_y
-                draw_stat_label(x_start, y_start, text_x, text_y, f"{file_size / (1024*1024):.2f}MB", col_file, 'w')
+            text_x = 180  # Right side text position
+            
+            for radius, text_y, color, text in label_positions:
+                # Calculate rightmost point on ring at label's y-position
+                dy = text_y - 100  # Distance from center y
+                
+                if abs(dy) <= radius:
+                    # Point exists on this ring at this y
+                    dx = math.sqrt(radius**2 - dy**2)
+                    x_start = 100 + dx
+                    y_start = text_y
+                else:
+                    # Fallback: use rightmost point of ring
+                    x_start = 100 + radius
+                    y_start = 100
+                
+                draw_stat_label(x_start, y_start, text_x, text_y, text, color, 'w')
     
     def draw_mini_gauge(self, canvas, percent, color):
         """Draw a small circular gauge for advanced stats"""
