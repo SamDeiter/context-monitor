@@ -5,6 +5,7 @@ Borderless, always-on-top token usage tracker for Antigravity
 
 import tkinter as tk
 from tkinter import messagebox
+import sys
 from pathlib import Path
 from datetime import datetime
 import json
@@ -149,6 +150,12 @@ class ContextMonitor:
                               bg=self.colors['bg3'], fg=self.colors['blue'])
             adv_btn.pack(side='right', padx=5)
             adv_btn.bind('<Button-1>', lambda e: self.toggle_advanced_mode())
+            
+            # Restart button
+            restart_btn = tk.Label(header, text="🔄", font=('Segoe UI', 10), cursor='hand2',
+                                  bg=self.colors['bg3'], fg=self.colors['text2'])
+            restart_btn.pack(side='right', padx=2)
+            restart_btn.bind('<Button-1>', lambda e: self.restart_app())
             
             # Mini mode toggle
             mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
@@ -351,33 +358,36 @@ class ContextMonitor:
             col_output = '#bc8cff'  # Purple
             col_file = '#39c5cf'    # Cyan
             
+            # Adjust radii to allow text to fit OUTSIDE the rings
+            cx, cy = 80, 80
+            r_in = 39    # Input (Inner)
+            r_out = 47   # Output (Middle)
+            r_file = 55  # File (Outer) - Max extent 80-55=25 to 80+55=135
+            
             # 1. Input Gauge (Inner Ring) - Blue
-            r_in = 48
             pct_in = min(1.0, estimated_input / context_window)
             self.gauge_canvas.create_arc(cx-r_in, cy-r_in, cx+r_in, cy+r_in, start=90, extent=-360,
-                                         style='arc', outline='#101418', width=6, tags='stats_arc')
+                                         style='arc', outline='#101418', width=5, tags='stats_arc')
             if pct_in > 0:
                 self.gauge_canvas.create_arc(cx-r_in, cy-r_in, cx+r_in, cy+r_in, start=90, extent=-360*pct_in,
-                                             style='arc', outline=col_input, width=6, tags='stats_arc')
+                                             style='arc', outline=col_input, width=5, tags='stats_arc')
             
             # 2. Output Gauge (Middle Ring) - Purple
-            r_out = 58
             pct_out = min(1.0, estimated_output / context_window)
             self.gauge_canvas.create_arc(cx-r_out, cy-r_out, cx+r_out, cy+r_out, start=90, extent=-360,
-                                         style='arc', outline='#101418', width=6, tags='stats_arc')
+                                         style='arc', outline='#101418', width=5, tags='stats_arc')
             if pct_out > 0:
                 self.gauge_canvas.create_arc(cx-r_out, cy-r_out, cx+r_out, cy+r_out, start=90, extent=-360*pct_out,
-                                             style='arc', outline=col_output, width=6, tags='stats_arc')
+                                             style='arc', outline=col_output, width=5, tags='stats_arc')
                                              
             # 3. File Size (Outer Ring) - Cyan
-            r_file = 68
             # Normalize file size to 50MB
             pct_file = min(1.0, file_size / (50 * 1024 * 1024))
             self.gauge_canvas.create_arc(cx-r_file, cy-r_file, cx+r_file, cy+r_file, start=90, extent=-360,
-                                         style='arc', outline='#101418', width=6, tags='stats_arc')
+                                         style='arc', outline='#101418', width=5, tags='stats_arc')
             if pct_file > 0:
                 self.gauge_canvas.create_arc(cx-r_file, cy-r_file, cx+r_file, cy+r_file, start=90, extent=-360*pct_file,
-                                             style='arc', outline=col_file, width=6, tags='stats_arc')
+                                             style='arc', outline=col_file, width=5, tags='stats_arc')
         
         # Font sizes
         pct_font_size = 22 if self.mini_mode else 14
@@ -408,21 +418,21 @@ class ContextMonitor:
         
         # Show advanced stats labels in mini mode if enabled (updated positions)
         if self.mini_mode and self.advanced_mode and self.current_session:
-             # Reposition labels to align EXACTLY with their rings
-            stats_font_size = 7
+             # Reposition labels to align EXACTLY with their rings but OUTSIDE them
+            stats_font_size = 8
             
-            # 1. Input (Blue, Inner Ring r=48) - Top
-            self.gauge_canvas.create_text(80, 22, text=f"IN:{estimated_input//1000}K", 
+            # 1. Input (Blue) - Top Center (Above everything)
+            self.gauge_canvas.create_text(80, 12, text=f"IN:{estimated_input//1000}K", 
                                          font=('Segoe UI', stats_font_size, 'bold'), 
                                          fill=col_input, tags='text')
             
-            # 2. Output (Purple, Middle Ring r=58) - Bottom Right
-            self.gauge_canvas.create_text(130, 115, text=f"OUT:{estimated_output//1000}K", 
+            # 2. Output (Purple) - Bottom Right Corner
+            self.gauge_canvas.create_text(130, 145, text=f"OUT:{estimated_output//1000}K", 
                                          font=('Segoe UI', stats_font_size, 'bold'), 
                                          fill=col_output, tags='text')
             
-            # 3. File (Cyan, Outer Ring r=68) - Bottom Left
-            self.gauge_canvas.create_text(30, 115, text=f"{file_size / (1024*1024):.2f}MB", 
+            # 3. File (Cyan) - Bottom Left Corner
+            self.gauge_canvas.create_text(30, 145, text=f"{file_size / (1024*1024):.2f}MB", 
                                          font=('Segoe UI', stats_font_size, 'bold'), 
                                          fill=col_file, tags='text')
     
@@ -658,7 +668,10 @@ Read those logs to understand what we were working on, then continue helping me.
                     return json.load(f)
         except Exception as e:
             print(f"Error loading settings: {e}")
-        return {'alpha': 0.95, 'mini_mode': False, 'advanced_mode': True}
+        # Force default advanced_mode to True if not present, but respect saved False if user explicitly disabled it?
+        # User requested advanced mode default.
+        settings = {'alpha': 0.95, 'mini_mode': False, 'advanced_mode': True}
+        return settings
     
     def save_settings(self):
         """Save settings to JSON file"""
@@ -771,6 +784,15 @@ Read those logs to understand what we were working on, then continue helping me.
     
     # ==================== DIAGNOSTICS ====================
     
+    def restart_app(self):
+        """Restart the application"""
+        try:
+            self.save_settings()
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+        except Exception as e:
+            print(f"Error restarting: {e}")
+
     def show_context_menu(self, event):
         """Show right-click context menu with improved styling"""
         menu = tk.Menu(self.root, tearoff=0, 
@@ -790,6 +812,7 @@ Read those logs to understand what we were working on, then continue helping me.
         # Actions section
         menu.add_command(label="  🧹  Clean Old Conversations", command=self.cleanup_old_conversations)
         menu.add_command(label="  🔄  Restart Antigravity", command=self.restart_antigravity)
+        menu.add_command(label="  🔁  Restart Widget", command=self.restart_app)
         menu.add_separator()
         
         # Mode toggle
