@@ -4,15 +4,9 @@ Borderless, always-on-top token usage tracker for Antigravity
 """
 
 import tkinter as tk
-from tkinter import messagebox
-import sys
 from pathlib import Path
 from datetime import datetime
 import json
-import subprocess
-import os
-import ctypes
-import platform
 
 class ContextMonitor:
     def __init__(self):
@@ -50,20 +44,11 @@ class ContextMonitor:
         self.current_session = None
         self.handoff_copied = False
         self.mini_mode = self.settings.get('mini_mode', False)
-        self.advanced_mode = self.settings.get('advanced_mode', False)
         self.flash_state = False
         self.current_percent = 0
         
-        # Project name cache
-        self.project_name_cache = {}
-        self.project_name_timestamp = {}
-        
         # Paths
         self.conversations_dir = Path.home() / '.gemini' / 'antigravity' / 'conversations'
-        
-        # Hardware Scan
-        self.total_ram_mb = self.get_total_memory()
-        self.thresholds = self.calculate_thresholds()
         
         self.setup_ui()
         self.load_session()
@@ -83,9 +68,8 @@ class ContextMonitor:
         y_pos = pos[2] if len(pos) > 2 else "50"
         
         if self.mini_mode:
-            # Mini mode: circular gauge with stats
-            size = 200 if self.advanced_mode else 120
-            self.root.geometry(f"{size}x{size}+{x_pos}+{y_pos}")
+            # Mini mode: circular gauge
+            self.root.geometry(f"120x120+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Use transparent color to create circular appearance
@@ -93,23 +77,17 @@ class ContextMonitor:
             self.root.configure(bg=trans_color)
             self.root.attributes('-transparentcolor', trans_color)
             
-            size = 200 if self.advanced_mode else 120
-            self.gauge_canvas = tk.Canvas(self.root, width=size, height=size,
+            self.gauge_canvas = tk.Canvas(self.root, width=120, height=120,
                                           bg=trans_color, highlightthickness=0)
             self.gauge_canvas.pack()
             
             # Draw circular background
-            if self.advanced_mode:
-                # Larger circle for advanced mode
-                self.gauge_canvas.create_oval(10, 10, 190, 190, fill=self.colors['bg'], outline='')
-            else:
-                self.gauge_canvas.create_oval(10, 10, 110, 110, fill=self.colors['bg'], outline='')
+            self.gauge_canvas.create_oval(10, 10, 110, 110, fill=self.colors['bg'], outline='')
             
             self.draw_gauge(self.current_percent)
             
             # Interactions
             self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
-            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
             
             # Bind drag to canvas
             self.gauge_canvas.bind('<Button-1>', self.start_drag)
@@ -118,9 +96,7 @@ class ContextMonitor:
         else:
             # Full mode - reset transparency
             self.root.attributes('-transparentcolor', '')
-            # Adjust height based on advanced mode
-            height = 280 if self.advanced_mode else 200
-            self.root.geometry(f"280x{height}+{x_pos}+{y_pos}")
+            self.root.geometry(f"280x200+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -144,23 +120,10 @@ class ContextMonitor:
                     bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
             alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(0.05))
             
-            # Advanced mode toggle
-            adv_icon = "📊" if not self.advanced_mode else "📉"
-            adv_btn = tk.Label(header, text=adv_icon, font=('Segoe UI', 10), cursor='hand2',
-                              bg=self.colors['bg3'], fg=self.colors['blue'])
-            adv_btn.pack(side='right', padx=8)
-            adv_btn.bind('<Button-1>', lambda e: self.toggle_advanced_mode())
-            
-            # Restart button
-            restart_btn = tk.Label(header, text="🔄", font=('Segoe UI', 10), cursor='hand2',
-                                  bg=self.colors['bg3'], fg=self.colors['blue'])
-            restart_btn.pack(side='right', padx=8)
-            restart_btn.bind('<Button-1>', lambda e: self.restart_app())
-            
             # Mini mode toggle
             mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
                                bg=self.colors['bg3'], fg=self.colors['blue'])
-            mini_btn.pack(side='right', padx=8)
+            mini_btn.pack(side='right', padx=5)
             mini_btn.bind('<Button-1>', lambda e: self.toggle_mini_mode())
             
             close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
@@ -171,109 +134,45 @@ class ContextMonitor:
             for w in [header, title]:
                 w.bind('<Button-1>', self.start_drag)
                 w.bind('<B1-Motion>', self.drag)
-                w.bind('<Button-3>', self.show_context_menu)
             
             # Content
             content = tk.Frame(self.root, bg=self.colors['bg2'], padx=15, pady=12)
             content.pack(fill='both', expand=True)
-            content.bind('<Button-3>', self.show_context_menu)
             
             # Main row
             main = tk.Frame(content, bg=self.colors['bg2'])
             main.pack(fill='x')
-            main.bind('<Button-3>', self.show_context_menu)
             
             # Gauge
             self.gauge_canvas = tk.Canvas(main, width=70, height=70, 
                                           bg=self.colors['bg2'], highlightthickness=0)
             self.gauge_canvas.pack(side='left', padx=(0, 12))
-            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
             self.draw_gauge(self.current_percent)
             
             # Info
             info = tk.Frame(main, bg=self.colors['bg2'])
             info.pack(side='left', fill='both', expand=True)
-            info.bind('<Button-3>', self.show_context_menu)
             
             tk.Label(info, text="TOKENS LEFT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
             self.tokens_label = tk.Label(info, text="—", font=('Segoe UI', 14, 'bold'),
                                          bg=self.colors['bg2'], fg=self.colors['text'])
             self.tokens_label.pack(anchor='w')
-            self.tokens_label.bind('<Button-3>', self.show_context_menu)
             
-            tk.Label(info, text="PROJECT", font=('Segoe UI', 8),
+            tk.Label(info, text="SESSION ID", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(8,0))
-            self.session_label = tk.Label(info, text="—", font=('Segoe UI', 8),
+            self.session_label = tk.Label(info, text="—", font=('Consolas', 8),
                                           bg=self.colors['bg2'], fg=self.colors['text2'])
             self.session_label.pack(anchor='w')
-            self.session_label.bind('<Button-3>', self.show_context_menu)
-            
-            # Advanced stats section (only shown when advanced_mode is True)
-            if self.advanced_mode:
-                # Separator
-                tk.Frame(content, bg=self.colors['muted'], height=1).pack(fill='x', pady=(8, 8))
-                
-                # Advanced breakdown with mini gauges
-                adv_row = tk.Frame(content, bg=self.colors['bg2'])
-                adv_row.pack(fill='x')
-                adv_row.bind('<Button-3>', self.show_context_menu)
-                
-                # Input tokens gauge
-                input_col = tk.Frame(adv_row, bg=self.colors['bg2'])
-                input_col.pack(side='left', expand=True, fill='both')
-                
-                self.input_canvas = tk.Canvas(input_col, width=50, height=50,
-                                             bg=self.colors['bg2'], highlightthickness=0)
-                self.input_canvas.pack(pady=(0, 4))
-                self.input_canvas.bind('<Button-3>', self.show_context_menu)
-                
-                tk.Label(input_col, text="INPUT", font=('Segoe UI', 7),
-                        bg=self.colors['bg2'], fg=self.colors['muted']).pack()
-                self.input_label = tk.Label(input_col, text="—", font=('Segoe UI', 8, 'bold'),
-                                           bg=self.colors['bg2'], fg=self.colors['text'])
-                self.input_label.pack()
-                
-                # Output tokens gauge
-                output_col = tk.Frame(adv_row, bg=self.colors['bg2'])
-                output_col.pack(side='left', expand=True, fill='both')
-                
-                self.output_canvas = tk.Canvas(output_col, width=50, height=50,
-                                              bg=self.colors['bg2'], highlightthickness=0)
-                self.output_canvas.pack(pady=(0, 4))
-                self.output_canvas.bind('<Button-3>', self.show_context_menu)
-                
-                tk.Label(output_col, text="OUTPUT", font=('Segoe UI', 7),
-                        bg=self.colors['bg2'], fg=self.colors['muted']).pack()
-                self.output_label = tk.Label(output_col, text="—", font=('Segoe UI', 8, 'bold'),
-                                            bg=self.colors['bg2'], fg=self.colors['text'])
-                self.output_label.pack()
-                
-                # File size info
-                file_col = tk.Frame(adv_row, bg=self.colors['bg2'])
-                file_col.pack(side='left', expand=True, fill='both')
-                
-                self.file_canvas = tk.Canvas(file_col, width=50, height=50,
-                                            bg=self.colors['bg2'], highlightthickness=0)
-                self.file_canvas.pack(pady=(0, 4))
-                self.file_canvas.bind('<Button-3>', self.show_context_menu)
-                
-                tk.Label(file_col, text="FILE SIZE", font=('Segoe UI', 7),
-                        bg=self.colors['bg2'], fg=self.colors['muted']).pack()
-                self.file_label = tk.Label(file_col, text="—", font=('Segoe UI', 8, 'bold'),
-                                          bg=self.colors['bg2'], fg=self.colors['text'])
-                self.file_label.pack()
             
             # Status bar with copy button
             self.status_frame = tk.Frame(content, bg=self.colors['bg3'], padx=8, pady=6)
             self.status_frame.pack(fill='x', pady=(10, 0))
-            self.status_frame.bind('<Button-3>', self.show_context_menu)
             
             self.status_label = tk.Label(self.status_frame, text="✓ Loading...", 
                                         font=('Segoe UI', 9),
                                         bg=self.colors['bg3'], fg=self.colors['text2'])
             self.status_label.pack(side='left')
-            self.status_label.bind('<Button-3>', self.show_context_menu)
             
             self.copy_btn = tk.Label(self.status_frame, text="📋 Copy", 
                                     font=('Segoe UI', 8), cursor='hand2',
@@ -282,187 +181,72 @@ class ContextMonitor:
             self.copy_btn.bind('<Button-1>', lambda e: self.copy_handoff())
             
             # Tooltips (full mode only)
-            self.create_tooltip(self.gauge_canvas, "Token Usage\\nGreen: Safe\\nYellow: < 60% Left\\nRed: < 80% Left")
-            self.create_tooltip(adv_btn, "Toggle Advanced Mode\\nShow detailed token breakdown")
-            self.create_tooltip(self.copy_btn, "Generate Handoff\\nCreates a summary prompt for the next agent")
-            self.create_tooltip(self.session_label, "Current Session ID\\nAuto-detected from files")
-            self.create_tooltip(mini_btn, "Toggle Mini Mode (M)\\nSwitch to compact view")
-            self.create_tooltip(alpha_frame, "Transparency (+/-)\\nAdjust window opacity")
+            self.create_tooltip(self.gauge_canvas, "Token Usage\nGreen: Safe\nYellow: < 60% Left\nRed: < 80% Left")
+            self.create_tooltip(self.copy_btn, "Generate Handoff\nCreates a summary prompt for the next agent")
+            self.create_tooltip(self.session_label, "Current Session ID\nAuto-detected from files")
+            self.create_tooltip(mini_btn, "Toggle Mini Mode (M)\nSwitch to compact view")
+            self.create_tooltip(alpha_frame, "Transparency (+/-)\nAdjust window opacity")
         
         # Keyboard shortcuts (global)
         self.root.bind('<KeyPress-m>', lambda e: self.toggle_mini_mode())
-        self.root.bind('<KeyPress-M>', lambda e: self.toggle_mini_mode())
         self.root.bind('<KeyPress-plus>', lambda e: self.adjust_alpha(0.05))
         self.root.bind('<KeyPress-minus>', lambda e: self.adjust_alpha(-0.05))
         self.root.bind('<KeyPress-r>', lambda e: self.reset_settings())
-        self.root.bind('<KeyPress-R>', lambda e: self.reset_settings())
-        self.root.bind('<KeyPress-a>', lambda e: self.show_advanced_stats())
-        self.root.bind('<KeyPress-A>', lambda e: self.show_advanced_stats())
         
     def create_tooltip(self, widget, text):
         tooltip = ToolTip(widget, text, self.colors)
         
     def draw_gauge(self, percent):
-        # Clear previous drawings
+        # Don't delete all in mini mode (preserve circle background)
         if not self.mini_mode:
             self.gauge_canvas.delete('all')
         else:
             self.gauge_canvas.delete('arc')
             self.gauge_canvas.delete('text')
         
+        # Get canvas dimensions for dynamic sizing
         width = self.gauge_canvas.winfo_reqwidth()
         
         if self.mini_mode:
-            if self.advanced_mode:
-                cx, cy = 100, 110  # Slightly lower center for semicircle
-                r = 55
-                arc_width = 12
-            else:
-                cx, cy = 60, 70
-                r = 45
-                arc_width = 10
-        else:
-            cx, cy = width // 2, (width // 2) + 5
-            r = (width // 2) - 15
+            # Center within the visible circle (which is at 10,10 to 110,110)
+            cx, cy = 60, 60
+            r = 35
             arc_width = 8
-        
-        # SEMICIRCULAR GAUGE (270 degrees, like speedometer)
-        # Starts at bottom-left (225°), sweeps to bottom-right (-45°)
-        start_angle = 225
-        sweep_angle = 270  # Total arc span
-        
-        # Background track
-        self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, 
-                                     start=start_angle, extent=-sweep_angle,
-                                     style='arc', outline='#2d333b', width=arc_width, tags='arc')
-        
-        # Colored progress arc
-        if percent > 0:
-            # Multi-segment color gradient effect
-            progress_extent = sweep_angle * (percent / 100)
-            
-            # Draw gradient segments for smooth color transition
-            segments = 20
-            for i in range(segments):
-                seg_start = start_angle - (progress_extent * i / segments)
-                seg_extent = -progress_extent / segments
-                
-                # Calculate color based on position (green → yellow → red)
-                seg_percent = (i / segments) * percent
-                if seg_percent >= 66:
-                    color = '#f85149'  # Red
-                elif seg_percent >= 33:
-                    color = '#d29922'  # Yellow
-                else:
-                    color = '#3fb950'  # Green
-                
-                self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r,
-                                             start=seg_start, extent=seg_extent,
-                                             style='arc', outline=color, width=arc_width, tags='arc')
-        
-        # Percentage text - large and centered
-        pct_font_size = 32 if self.mini_mode else 18
-        
-        # Text shadow for depth
-        self.gauge_canvas.create_text(cx+2, cy-10+2, text=f"{percent}%", 
-                                      font=('Segoe UI', pct_font_size, 'bold'), 
-                                      fill='#000000', tags='text')
-        # Main text
-        self.gauge_canvas.create_text(cx, cy-10, text=f"{percent}%", 
-                                      font=('Segoe UI', pct_font_size, 'bold'), 
-                                      fill='#ffffff', tags='text')
-        
-        # Small label below percentage
-        if self.mini_mode:
-            self.gauge_canvas.create_text(cx, cy+15, text="CONTEXT", 
-                                          font=('Segoe UI', 8), fill='#8b949e', tags='text')
         else:
-            self.gauge_canvas.create_text(cx, cy+12, text="CONTEXT", 
-                                          font=('Segoe UI', 7), fill=self.colors['muted'], tags='text')
+            cx, cy = width // 2, width // 2
+            r = (width // 2) - 12
+            arc_width = 6
         
-        # Show advanced stats labels in mini mode with LEADER LINES
-        if self.mini_mode and self.advanced_mode and self.current_session:
-            # Calculate stats values
-            file_size = self.current_session.get('size', 0)
-            total_tokens = file_size // 4
-            estimated_input = int(total_tokens * 0.4)
-            estimated_output = int(total_tokens * 0.6)
-            
-            # Colors for stats
-            col_input = '#58a6ff'   # Blue
-            col_output = '#a371f7'  # Purple
-            col_file = '#39d353'    # Green
-            
-            # Ring radii for label positioning
-            r_in = 55
-            r_out = 70
-            r_file = 85
-            
-            stats_font_size = 9
-            
-            # Helper to draw leader line and text
-            def draw_stat_label(x_start, y_start, x_end, y_end, text, color, anchor='center'):
-                 # Enhanced leader line with slight glow
-                 self.gauge_canvas.create_line(x_start, y_start, x_end, y_end, fill='#000000', width=3, tags='text')
-                 self.gauge_canvas.create_line(x_start, y_start, x_end, y_end, fill=color, width=2, tags='text')
-                 # Text with subtle shadow for depth
-                 shadow_offset = 1
-                 self.gauge_canvas.create_text(x_end + shadow_offset, y_end + shadow_offset, 
-                                              text=text, font=('Segoe UI', stats_font_size, 'bold'), 
-                                              fill='#000000', tags='text', anchor=anchor)
-                 self.gauge_canvas.create_text(x_end, y_end, 
-                                              text=text, font=('Segoe UI', stats_font_size, 'bold'), 
-                                              fill=color, tags='text', anchor=anchor)
-            # Layout: Labels on RIGHT side with horizontal leader lines from ring edges
-            import math
-            
-            # Vertical spacing for labels (evenly distributed on right)
-            label_positions = [
-                (r_in, 70, col_input, f"IN:{estimated_input//1000}K"),      # Inner ring (Blue)
-                (r_out, 100, col_output, f"OUT:{estimated_output//1000}K"), # Middle ring (Purple)
-                (r_file, 130, col_file, f"{file_size/(1024*1024):.2f}MB")   # Outer ring (Cyan)
-            ]
-            
-            text_x = 180  # Right side text position
-            
-            for radius, text_y, color, text in label_positions:
-                # Calculate rightmost point on ring at label's y-position
-                dy = text_y - 110  # Distance from center y (adjusted for semicircle)
-                
-                if abs(dy) <= radius:
-                    # Point exists on this ring at this y
-                    dx = math.sqrt(radius**2 - dy**2)
-                    x_start = 100 + dx
-                    y_start = text_y
-                else:
-                    # Fallback: use rightmost point of ring
-                    x_start = 100 + radius
-                    y_start = 110
-                
-                draw_stat_label(x_start, y_start, text_x, text_y, text, color, 'w')
-    
-    def draw_mini_gauge(self, canvas, percent, color):
-        """Draw a small circular gauge for advanced stats"""
-        canvas.delete('all')
+        self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-360,
+                                     style='arc', outline=self.colors['bg3'], width=arc_width, tags='arc')
         
-        width = canvas.winfo_reqwidth()
-        cx, cy = width // 2, width // 2
-        r = (width // 2) - 8
-        arc_width = 4
-        
-        # Background arc
-        canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-360,
-                         style='arc', outline=self.colors['bg3'], width=arc_width)
-        
-        # Filled arc
         if percent > 0:
-            canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, 
-                             extent=-360*(percent/100),
-                             style='arc', outline=color, width=arc_width)
+            color = self.colors['green']
+            if percent >= 80:
+                color = self.colors['red']
+            elif percent >= 60:
+                color = self.colors['yellow']
+            self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, 
+                                         extent=-360*(percent/100),
+                                         style='arc', outline=color, width=arc_width, tags='arc')
         
-        # Center percentage
-        canvas.create_text(cx, cy, text=f"{percent}%", 
-                          font=('Segoe UI', 9, 'bold'), fill=self.colors['text'])
+        # Larger fonts for mini mode
+        pct_font_size = 18 if self.mini_mode else 14
+        label_font_size = 9 if self.mini_mode else 7
+        
+        # Drop shadow for mini mode (offset dark text behind)
+        if self.mini_mode:
+            shadow_offset = 2
+            shadow_color = '#000000'
+            self.gauge_canvas.create_text(cx+shadow_offset, cy-6+shadow_offset, text=f"{percent}%", 
+                                          font=('Segoe UI', pct_font_size, 'bold'), fill=shadow_color, tags='text')
+            self.gauge_canvas.create_text(cx+shadow_offset, cy+14+shadow_offset, text="CONTEXT", 
+                                          font=('Segoe UI', label_font_size), fill=shadow_color, tags='text')
+        
+        self.gauge_canvas.create_text(cx, cy-6, text=f"{percent}%", 
+                                      font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
+        self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
+                                      font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
         
     def get_sessions(self):
         sessions = []
@@ -481,92 +265,7 @@ class ContextMonitor:
             print(f"Error: {e}")
         return sessions
 
-    def get_project_name(self, session_id):
-        """Extract project name from brain directory with caching"""
-        import time
-        
-        # Check cache first (cache for 60 seconds)
-        current_time = time.time()
-        if session_id in self.project_name_cache:
-            cache_age = current_time - self.project_name_timestamp.get(session_id, 0)
-            if cache_age < 60:
-                return self.project_name_cache[session_id]
-        
-        try:
-            brain_dir = Path.home() / '.gemini' / 'antigravity' / 'brain' / session_id
-            
-            # Strategy 1: Look for GitHub project path in markdown files
-            # This is most accurate for "Project Name"
-            import re
-            # Pattern matches: .../Documents/GitHub/RepoName/...
-            # Captures 'RepoName'
-            github_pattern = re.compile(r'GitHub[\\/]([^\\/)\n\r]+)', re.IGNORECASE)
-            
-            # Check all markdown files, prioritizing specific ones
-            priority_files = ['task.md', 'walkthrough.md', 'implementation_plan.md']
-            try:
-                # Get all md files
-                all_md_files = list(brain_dir.glob('*.md'))
-                # Sort: priority files first, then alphabetical
-                all_md_files.sort(key=lambda f: (0 if f.name in priority_files else 1, f.name))
-                
-                for fpath in all_md_files:
-                    try:
-                        content = fpath.read_text(encoding='utf-8', errors='ignore')
-                        match = github_pattern.search(content)
-                        if match:
-                            project_name = match.group(1).strip()
-                            # Cache the result
-                            self.project_name_cache[session_id] = project_name
-                            self.project_name_timestamp[session_id] = current_time
-                            return project_name
-                    except Exception as e:
-                        print(f"Error reading {fpath.name}: {e}")
-                        continue
-            except Exception as e:
-                print(f"Error scanning md files: {e}")
 
-            # Strategy 2: Fallback to Task Name (header in task.md)
-            task_file = brain_dir / 'task.md'
-            if task_file.exists():
-                try:
-                    with open(task_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        for line in content.split('\n'):
-                            line = line.strip()
-                            # Return the first header found
-                            if line.startswith('# '):
-                                project_name = line[2:].strip()
-                                self.project_name_cache[session_id] = project_name
-                                self.project_name_timestamp[session_id] = current_time
-                                return project_name
-                except Exception as e:
-                    print(f"Error reading task.md: {e}")
-            
-            # Strategy 3: Implementation plan header
-            plan_file = brain_dir / 'implementation_plan.md'
-            if plan_file.exists():
-                try:
-                    with open(plan_file, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith('# '):
-                                project_name = line[2:].strip()
-                                self.project_name_cache[session_id] = project_name
-                                self.project_name_timestamp[session_id] = current_time
-                                return project_name
-                except Exception as e:
-                    print(f"Error reading implementation_plan.md: {e}")
-                            
-        except Exception as e:
-            print(f"Error getting project name: {e}")
-        
-        # Final fallback: short session ID
-        fallback = f"Session {session_id[:8]}"
-        # Cache even the fallback to prevent repeated failures
-        self.project_name_cache[session_id] = fallback
-        self.project_name_timestamp[session_id] = current_time
-        return fallback
     
     def load_session(self):
         sessions = self.get_sessions()
@@ -586,29 +285,7 @@ class ContextMonitor:
         
         if not self.mini_mode:
             self.tokens_label.config(text=f"{tokens_left:,}")
-            
-            # Try to get project name from brain directory
-            project_name = self.get_project_name(self.current_session['id'])
-            self.session_label.config(text=project_name)
-            
-            # Update advanced stats if in advanced mode
-            if self.advanced_mode and hasattr(self, 'input_label'):
-                file_size = self.current_session['size']
-                total_tokens = file_size // 4
-                estimated_input = int(total_tokens * 0.4)
-                estimated_output = int(total_tokens * 0.6)
-                
-                # Update labels
-                self.input_label.config(text=f"{estimated_input//1000}K")
-                self.output_label.config(text=f"{estimated_output//1000}K")
-                self.file_label.config(text=f"{file_size / (1024*1024):.1f}MB")
-                
-                # Draw mini gauges
-                self.draw_mini_gauge(self.input_canvas, 40, self.colors['blue'])
-                self.draw_mini_gauge(self.output_canvas, 60, self.colors['green'])
-                # File size as percentage of typical max (50MB)
-                file_percent = min(100, int((file_size / (50 * 1024 * 1024)) * 100))
-                self.draw_mini_gauge(self.file_canvas, file_percent, self.colors['yellow'])
+            self.session_label.config(text=f"{self.current_session['id'][:18]}...")
             
             # Update status and auto-copy at 80%
             if percent >= 80:
@@ -622,7 +299,7 @@ class ContextMonitor:
                 self.status_frame.config(bg='#2d2a1a')
                 self.handoff_copied = False
             else:
-                self.status_label.config(text="✓ Context healthy", fg=self.colors['green'])
+                self.status_label.config(text="✓ Plenty of fuel", fg=self.colors['green'])
                 self.status_frame.config(bg=self.colors['bg3'])
                 self.handoff_copied = False
             
@@ -673,10 +350,7 @@ Read those logs to understand what we were working on, then continue helping me.
                     return json.load(f)
         except Exception as e:
             print(f"Error loading settings: {e}")
-        # Force default advanced_mode to True if not present, but respect saved False if user explicitly disabled it?
-        # User requested advanced mode default.
-        settings = {'alpha': 0.95, 'mini_mode': False, 'advanced_mode': True}
-        return settings
+        return {'alpha': 0.95, 'mini_mode': False}
     
     def save_settings(self):
         """Save settings to JSON file"""
@@ -685,8 +359,7 @@ Read those logs to understand what we were working on, then continue helping me.
             with open(self.settings_file, 'w') as f:
                 json.dump({
                     'alpha': self.root.attributes('-alpha'),
-                    'mini_mode': self.mini_mode,
-                    'advanced_mode': self.advanced_mode
+                    'mini_mode': self.mini_mode
                 }, f, indent=2)
         except Exception as e:
             print(f"Error saving settings: {e}")
@@ -694,13 +367,6 @@ Read those logs to understand what we were working on, then continue helping me.
     def toggle_mini_mode(self):
         """Toggle between full and mini mode"""
         self.mini_mode = not self.mini_mode
-        self.save_settings()
-        self.setup_ui()
-        self.load_session()
-    
-    def toggle_advanced_mode(self):
-        """Toggle advanced mode to show/hide detailed stats"""
-        self.advanced_mode = not self.advanced_mode
         self.save_settings()
         self.setup_ui()
         self.load_session()
@@ -748,322 +414,6 @@ Read those logs to understand what we were working on, then continue helping me.
     
     def run(self):
         self.root.mainloop()
-        
-    def get_total_memory(self):
-        """Detect total system RAM in MB using ctypes"""
-        try:
-            if platform.system() == "Windows":
-                kernel32 = ctypes.windll.kernel32
-                c_ulonglong = ctypes.c_ulonglong
-                class MEMORYSTATUSEX(ctypes.Structure):
-                    _fields_ = [
-                        ('dwLength', ctypes.c_ulong),
-                        ('dwMemoryLoad', ctypes.c_ulong),
-                        ('ullTotalPhys', c_ulonglong),
-                        ('ullAvailPhys', c_ulonglong),
-                        ('ullTotalPageFile', c_ulonglong),
-                        ('ullAvailPageFile', c_ulonglong),
-                        ('ullTotalVirtual', c_ulonglong),
-                        ('ullAvailVirtual', c_ulonglong),
-                        ('ullAvailExtendedVirtual', c_ulonglong),
-                    ]
-                memoryStatus = MEMORYSTATUSEX()
-                memoryStatus.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-                kernel32.GlobalMemoryStatusEx(ctypes.byref(memoryStatus))
-                return int(memoryStatus.ullTotalPhys / (1024 * 1024))
-            else:
-                return 16384 # Fallback
-        except Exception as e:
-            print(f"Error detecting RAM: {e}")
-            return 16384
-            
-    def calculate_thresholds(self):
-        """Calculate warnings based on system RAM"""
-        ram = self.total_ram_mb
-        return {
-            'proc_warn': max(500, int(ram * 0.015)),  # 1.5% (approx 2GB for 128GB)
-            'proc_crit': max(1000, int(ram * 0.04)),  # 4% (approx 5GB for 128GB)
-            'total_warn': max(2000, int(ram * 0.10)), # 10% (approx 12GB for 128GB)
-            'total_crit': max(3000, int(ram * 0.15))  # 15% (approx 19GB for 128GB)
-        }
-    
-    # ==================== DIAGNOSTICS ====================
-    
-    def restart_app(self):
-        """Restart the application"""
-        try:
-            self.save_settings()
-            python = sys.executable
-            os.execl(python, python, *sys.argv)
-        except Exception as e:
-            print(f"Error restarting: {e}")
-
-    def show_context_menu(self, event):
-        """Show right-click context menu with improved styling"""
-        menu = tk.Menu(self.root, tearoff=0, 
-                      bg=self.colors['bg2'], 
-                      fg=self.colors['text'],
-                      activebackground=self.colors['blue'], 
-                      activeforeground='white',
-                      font=('Segoe UI', 9),
-                      relief='flat',
-                      borderwidth=1)
-        
-        # Diagnostics section
-        menu.add_command(label="  📊  Show Diagnostics", command=self.show_diagnostics)
-        menu.add_command(label="  📈  Advanced Token Stats", command=self.show_advanced_stats)
-        menu.add_separator()
-        
-        # Actions section
-        menu.add_command(label="  🧹  Clean Old Conversations", command=self.cleanup_old_conversations)
-        menu.add_command(label="  🔄  Restart Antigravity", command=self.restart_antigravity)
-        menu.add_command(label="  🔁  Restart Widget", command=self.restart_app)
-        menu.add_separator()
-        
-        # Mode toggle
-        if self.mini_mode:
-            menu.add_command(label="  ◳  Expand to Full Mode", command=self.toggle_mini_mode)
-        else:
-            menu.add_command(label="  ◱  Collapse to Mini Mode", command=self.toggle_mini_mode)
-        
-        menu.add_separator()
-        menu.add_command(label="  ✕  Exit", command=self.root.destroy)
-        
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
-    
-    def get_antigravity_processes(self):
-        """Get memory/CPU usage of Antigravity processes (Fast fallback)"""
-        # PowerShell/WMI is too slow on this user's machine (causing UI freeze)
-        # We will iterate processes using tasklist which is faster, or just return empty for speed
-        try:
-             # Fast check using tasklist CSV format
-            cmd = 'tasklist /FI "IMAGENAME eq Antigravity.exe" /FO CSV /NH'
-            result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
-            
-            data = []
-            if result.stdout:
-                for line in result.stdout.splitlines():
-                    if 'Antigravity' in line:
-                        parts = line.split('","')
-                        if len(parts) >= 5:
-                            pid = parts[1]
-                            mem_str = parts[4].replace('"', '').replace(' K', '').replace(',', '')
-                            mem_mb = int(mem_str) // 1024
-                            data.append({
-                                'Id': pid,
-                                'Type': 'Process', # Detailed type requires slow WMI
-                                'Mem': mem_mb,
-                                'CPU': 0 # CPU requires slow PerfCounters
-                            })
-            return data
-        except Exception as e:
-            print(f"Error getting processes: {e}")
-            return []
-    
-    def get_large_conversations(self, min_size_mb=5):
-        """Get conversation files larger than min_size_mb"""
-        large_files = []
-        try:
-            for f in self.conversations_dir.glob('*.pb'):
-                size_mb = f.stat().st_size / (1024 * 1024)
-                if size_mb >= min_size_mb:
-                    large_files.append({
-                        'name': f.stem[:8] + '...',
-                        'size_mb': round(size_mb, 1),
-                        'path': f
-                    })
-            large_files.sort(key=lambda x: x['size_mb'], reverse=True)
-        except Exception as e:
-            print(f"Error scanning files: {e}")
-        return large_files[:5]
-    
-    def show_diagnostics(self):
-        """Show diagnostics popup with detailed recommendations"""
-        procs = self.get_antigravity_processes()
-        files = self.get_large_conversations()
-        
-        # Build message
-        msg = "=== ANTIGRAVITY PROCESSES ===\n"
-        msg += f"(System Logic: {self.total_ram_mb//1024}GB RAM detected)\n"
-        total_mem = 0
-        high_mem_types = []
-        limits = self.thresholds
-        
-        for p in procs:
-            mem = p.get('Mem', 0)
-            total_mem += mem
-            cpu = p.get('CPU', 0)
-            ptype = p.get('Type', 'Unknown')
-            status = "🔴" if mem > limits['proc_crit'] else "🟡" if mem > limits['proc_warn'] else "🟢"
-            msg += f"{status} {ptype}: {mem}MB RAM, {cpu}s CPU\n"
-            if mem > limits['proc_warn']:
-                high_mem_types.append(ptype)
-        
-        msg += f"\nTotal: {total_mem}MB across {len(procs)} processes\n"
-        
-        msg += "\n=== LARGE CONVERSATION FILES ===\n"
-        total_size = sum(f['size_mb'] for f in files)
-        for f in files:
-            status = "🔴" if f['size_mb'] > 15 else "🟡" if f['size_mb'] > 8 else "🟢"
-            msg += f"{status} {f['name']}: {f['size_mb']}MB\n"
-        msg += f"\nTotal large files: {total_size:.1f}MB\n"
-        
-        # Specific recommendations
-        msg += "\n=== WHAT TO DO ===\n"
-        
-        if 'Extension Host' in high_mem_types:
-            msg += "⚠️ Extension Host using high memory!\n"
-            msg += "   → Disable unused extensions\n"
-            msg += "   → Reload Window (Ctrl+Shift+P → Reload)\n\n"
-        
-        if 'Renderer/GPU' in high_mem_types:
-            msg += "⚠️ Renderer process high!\n"
-            msg += "   → Close unused tabs/editors\n"
-            msg += "   → Restart Antigravity\n\n"
-        
-        if 'Language Server' in high_mem_types:
-            msg += "⚠️ Language Server consuming RAM!\n"
-            msg += "   → Close large projects\n"
-            msg += "   → Restart language server\n\n"
-        
-        if total_size > 50:
-            msg += "⚠️ Large conversation files!\n"
-            msg += "   → Use 'Clean Old Conversations'\n\n"
-        
-        if total_mem > limits['total_crit']:
-            msg += f"🔴 CRITICAL: Total memory > {limits['total_crit']//1024}GB!\n"
-            msg += "   → RESTART ANTIGRAVITY NOW\n"
-        elif total_mem > limits['total_warn']:
-            msg += f"🟡 High memory usage (>{limits['total_warn']//1024}GB)\n"
-            msg += "   → Consider restarting soon\n"
-        elif not high_mem_types and total_size <= 50:
-            msg += "✅ System looks healthy!\n"
-        
-        messagebox.showinfo("Context Monitor - Diagnostics", msg)
-    
-    def cleanup_old_conversations(self):
-        """Delete conversation files older than 7 days and larger than 5MB"""
-        files = self.get_large_conversations(min_size_mb=5)
-        if not files:
-            messagebox.showinfo("Cleanup", "No large files to clean up!")
-            return
-        
-        msg = f"Found {len(files)} large conversation files:\n\n"
-        for f in files:
-            msg += f"• {f['name']}: {f['size_mb']}MB\n"
-        msg += "\nDelete these files? (Current session will be preserved)"
-        
-        if messagebox.askyesno("Cleanup Old Conversations", msg):
-            deleted = 0
-            current_id = self.current_session['id'] if self.current_session else None
-            for f in files:
-                if current_id and current_id in str(f['path']):
-                    continue  # Skip current session
-                try:
-                    f['path'].unlink()
-                    deleted += 1
-                except Exception as e:
-                    print(f"Error deleting {f['path']}: {e}")
-            messagebox.showinfo("Cleanup Complete", f"Deleted {deleted} files.")
-    
-    def restart_antigravity(self):
-        """Restart Antigravity IDE"""
-        if messagebox.askyesno("Restart Antigravity", 
-                               "This will close all Antigravity windows and restart.\n\nContinue?"):
-            try:
-                # Kill all Antigravity processes
-                subprocess.run(['taskkill', '/F', '/IM', 'Antigravity.exe'], 
-                             capture_output=True, timeout=10)
-                # Wait a moment
-                self.root.after(2000, self._launch_antigravity)
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to restart: {e}")
-    
-    def _launch_antigravity(self):
-        """Helper to launch Antigravity after restart"""
-        try:
-            antigravity_path = Path.home() / 'AppData' / 'Local' / 'Programs' / 'Antigravity' / 'bin' / 'antigravity.cmd'
-            if antigravity_path.exists():
-                subprocess.Popen([str(antigravity_path)], shell=True)
-        except Exception as e:
-            print(f"Error launching Antigravity: {e}")
-    
-    def show_advanced_stats(self):
-        """Show detailed token usage breakdown"""
-        if not self.current_session:
-            messagebox.showinfo("Advanced Stats", "No active session found.")
-            return
-        
-        try:
-            # Get conversation file
-            conv_file = self.conversations_dir / f"{self.current_session['id']}.pb"
-            if not conv_file.exists():
-                messagebox.showinfo("Advanced Stats", "Conversation file not found.")
-                return
-            
-            # Calculate token estimates
-            file_size = conv_file.stat().st_size
-            total_tokens = file_size // 4
-            
-            # Estimate breakdown (since we can't parse protobuf easily)
-            # Typical ratio is ~40% input, ~60% output
-            estimated_input = int(total_tokens * 0.4)
-            estimated_output = int(total_tokens * 0.6)
-            
-            context_window = 200000
-            tokens_used = self.current_session['estimated_tokens'] // 10
-            tokens_left = max(0, context_window - tokens_used)
-            percent_used = min(100, round((tokens_used / context_window) * 100))
-            
-            # Build detailed message
-            msg = "=== TOKEN USAGE BREAKDOWN ===\n\n"
-            msg += f"Context Window: {context_window:,} tokens\n"
-            msg += f"Tokens Used: {tokens_used:,} ({percent_used}%)\n"
-            msg += f"Tokens Remaining: {tokens_left:,}\n\n"
-            
-            msg += "=== ESTIMATED BREAKDOWN ===\n"
-            msg += f"Input Tokens (User): ~{estimated_input:,}\n"
-            msg += f"Output Tokens (Assistant): ~{estimated_output:,}\n\n"
-            
-            # Visual bar chart
-            msg += "=== USAGE VISUALIZATION ===\n"
-            bar_length = 40
-            used_bars = int((percent_used / 100) * bar_length)
-            remaining_bars = bar_length - used_bars
-            
-            if percent_used >= 80:
-                bar_color = "🔴"
-            elif percent_used >= 60:
-                bar_color = "🟡"
-            else:
-                bar_color = "🟢"
-            
-            msg += f"{bar_color} [{'█' * used_bars}{'░' * remaining_bars}] {percent_used}%\n\n"
-            
-            # File info
-            msg += "=== FILE INFORMATION ===\n"
-            msg += f"Conversation File: {conv_file.name}\n"
-            msg += f"File Size: {file_size / (1024*1024):.2f} MB\n"
-            msg += f"Session ID: {self.current_session['id'][:16]}...\n\n"
-            
-            # Recommendations
-            msg += "=== RECOMMENDATIONS ===\n"
-            if percent_used >= 80:
-                msg += "🔴 CRITICAL: Start a new session soon!\n"
-                msg += "   → Use 'Copy Handoff' to transition\n"
-            elif percent_used >= 60:
-                msg += "🟡 WARNING: Approaching context limit\n"
-                msg += "   → Plan to wrap up current task\n"
-            else:
-                msg += "✅ Context usage is healthy\n"
-            
-            messagebox.showinfo("Advanced Token Statistics", msg)
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to generate stats: {e}")
 
 class ToolTip:
     def __init__(self, widget, text, colors):
@@ -1071,50 +421,27 @@ class ToolTip:
         self.text = text
         self.colors = colors
         self.tooltip = None
-        self.id = None
-        self.widget.bind("<Enter>", self.schedule)
-        self.widget.bind("<Leave>", self.hide)
-        self.widget.bind("<ButtonPress>", self.hide)
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.leave)
 
-    def schedule(self, event=None):
-        self.unschedule()
-        self.id = self.widget.after(500, self.show)
-
-    def unschedule(self):
-        if self.id:
-            self.widget.after_cancel(self.id)
-            self.id = None
-
-    def show(self, event=None):
-        if self.tooltip:
-            return
-            
+    def enter(self, event=None):
         x, y, _, _ = self.widget.bbox("insert") if self.widget.bbox("insert") else (0, 0, 0, 0)
         x += self.widget.winfo_rootx() + 25
         y += self.widget.winfo_rooty() + 20
         
-        # Prevent tooltip from being created if widget is not visible
-        try:
-            self.tooltip = tk.Toplevel(self.widget)
-            self.tooltip.wm_overrideredirect(True)
-            self.tooltip.wm_geometry(f"+{x}+{y}")
-            self.tooltip.attributes('-topmost', True)
-            
-            label = tk.Label(self.tooltip, text=self.text, justify='left',
-                           bg=self.colors['bg3'], fg=self.colors['text'],
-                           relief='solid', borderwidth=1,
-                           font=("Segoe UI", 8))
-            label.pack()
-        except:
-            self.hide()
+        self.tooltip = tk.Toplevel(self.widget)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{x}+{y}")
+        
+        label = tk.Label(self.tooltip, text=self.text, justify='left',
+                       bg=self.colors['bg3'], fg=self.colors['text'],
+                       relief='solid', borderwidth=1,
+                       font=("Segoe UI", 8))
+        label.pack()
 
-    def hide(self, event=None):
-        self.unschedule()
+    def leave(self, event=None):
         if self.tooltip:
-            try:
-                self.tooltip.destroy()
-            except:
-                pass
+            self.tooltip.destroy()
             self.tooltip = None
 
 if __name__ == '__main__':
