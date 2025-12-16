@@ -303,123 +303,101 @@ class ContextMonitor:
         tooltip = ToolTip(widget, text, self.colors)
         
     def draw_gauge(self, percent):
-        # Don't delete all in mini mode (preserve circle background)
+        # Clear previous drawings
         if not self.mini_mode:
             self.gauge_canvas.delete('all')
         else:
             self.gauge_canvas.delete('arc')
             self.gauge_canvas.delete('text')
         
-        # Get canvas dimensions for dynamic sizing
         width = self.gauge_canvas.winfo_reqwidth()
         
         if self.mini_mode:
-            # Center within the visible circle
             if self.advanced_mode:
-                cx, cy = 100, 100
-                # Main context gauge - THICK for dashboard look
-                r = 32
-                arc_width = 15  # Much thicker for dashboard style
+                cx, cy = 100, 110  # Slightly lower center for semicircle
+                r = 55
+                arc_width = 12
             else:
-                cx, cy = 60, 60
-                r = 40
-                arc_width = 12  # Thicker arc
+                cx, cy = 60, 70
+                r = 45
+                arc_width = 10
         else:
-            cx, cy = width // 2, width // 2
-            r = (width // 2) - 12
+            cx, cy = width // 2, (width // 2) + 5
+            r = (width // 2) - 15
             arc_width = 8
         
-        # Draw background track (gray)
-        self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-360,
+        # SEMICIRCULAR GAUGE (270 degrees, like speedometer)
+        # Starts at bottom-left (225°), sweeps to bottom-right (-45°)
+        start_angle = 225
+        sweep_angle = 270  # Total arc span
+        
+        # Background track
+        self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, 
+                                     start=start_angle, extent=-sweep_angle,
                                      style='arc', outline='#2d333b', width=arc_width, tags='arc')
         
-        # Draw colored arc with gradient-style color coding
+        # Colored progress arc
         if percent > 0:
-            # Dashboard-style color gradient based on usage
-            if percent >= 80:
-                color = '#f85149'  # Red - Critical
-            elif percent >= 60:
-                color = '#d29922'  # Yellow - Warning  
-            elif percent >= 40:
-                color = '#7ee787'  # Light Green - Moderate
-            else:
-                color = '#3fb950'  # Green - Safe
+            # Multi-segment color gradient effect
+            progress_extent = sweep_angle * (percent / 100)
             
-            self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, 
-                                         extent=-360*(percent/100),
-                                         style='arc', outline=color, width=arc_width, tags='arc')
+            # Draw gradient segments for smooth color transition
+            segments = 20
+            for i in range(segments):
+                seg_start = start_angle - (progress_extent * i / segments)
+                seg_extent = -progress_extent / segments
+                
+                # Calculate color based on position (green → yellow → red)
+                seg_percent = (i / segments) * percent
+                if seg_percent >= 66:
+                    color = '#f85149'  # Red
+                elif seg_percent >= 33:
+                    color = '#d29922'  # Yellow
+                else:
+                    color = '#3fb950'  # Green
+                
+                self.gauge_canvas.create_arc(cx-r, cy-r, cx+r, cy+r,
+                                             start=seg_start, extent=seg_extent,
+                                             style='arc', outline=color, width=arc_width, tags='arc')
         
-        # Advanced Mode: Draw Concentric Rings for Input, Output, File Size
+        # Percentage text - large and centered
+        pct_font_size = 32 if self.mini_mode else 18
+        
+        # Text shadow for depth
+        self.gauge_canvas.create_text(cx+2, cy-10+2, text=f"{percent}%", 
+                                      font=('Segoe UI', pct_font_size, 'bold'), 
+                                      fill='#000000', tags='text')
+        # Main text
+        self.gauge_canvas.create_text(cx, cy-10, text=f"{percent}%", 
+                                      font=('Segoe UI', pct_font_size, 'bold'), 
+                                      fill='#ffffff', tags='text')
+        
+        # Small label below percentage
+        if self.mini_mode:
+            self.gauge_canvas.create_text(cx, cy+15, text="CONTEXT", 
+                                          font=('Segoe UI', 8), fill='#8b949e', tags='text')
+        else:
+            self.gauge_canvas.create_text(cx, cy+12, text="CONTEXT", 
+                                          font=('Segoe UI', 7), fill=self.colors['muted'], tags='text')
+        
+        # Show advanced stats labels in mini mode with LEADER LINES
         if self.mini_mode and self.advanced_mode and self.current_session:
+            # Calculate stats values
             file_size = self.current_session.get('size', 0)
             total_tokens = file_size // 4
             estimated_input = int(total_tokens * 0.4)
             estimated_output = int(total_tokens * 0.6)
             
-            # Context window for normalization
-            context_window = 200000
-            
-            # Colors for stats - bright, clear dashboard colors
+            # Colors for stats
             col_input = '#58a6ff'   # Blue
             col_output = '#a371f7'  # Purple
             col_file = '#39d353'    # Green
             
-            # Concentric rings - proper spacing
-            cx, cy = 100, 100
-            r_in = 52    # Input (Inner)
-            r_out = 66   # Output (Middle)
-            r_file = 80  # File (Outer)
+            # Ring radii for label positioning
+            r_in = 55
+            r_out = 70
+            r_file = 85
             
-            width_r = 8  # Dashboard-style ring width
-            
-            # 1. Input Gauge (Inner Ring) - Blue
-            pct_in = min(1.0, estimated_input / context_window)
-            self.gauge_canvas.create_arc(cx-r_in, cy-r_in, cx+r_in, cy+r_in, start=90, extent=-360,
-                                         style='arc', outline='#21262d', width=width_r, tags='stats_arc')
-            if pct_in > 0:
-                self.gauge_canvas.create_arc(cx-r_in, cy-r_in, cx+r_in, cy+r_in, start=90, extent=-360*pct_in,
-                                             style='arc', outline=col_input, width=width_r, tags='stats_arc')
-            
-            # 2. Output Gauge (Middle Ring) - Purple
-            pct_out = min(1.0, estimated_output / context_window)
-            self.gauge_canvas.create_arc(cx-r_out, cy-r_out, cx+r_out, cy+r_out, start=90, extent=-360,
-                                         style='arc', outline='#21262d', width=width_r, tags='stats_arc')
-            if pct_out > 0:
-                self.gauge_canvas.create_arc(cx-r_out, cy-r_out, cx+r_out, cy+r_out, start=90, extent=-360*pct_out,
-                                             style='arc', outline=col_output, width=width_r, tags='stats_arc')
-                                             
-            # 3. File Size (Outer Ring) - Green
-            pct_file = min(1.0, file_size / (50 * 1024 * 1024))
-            self.gauge_canvas.create_arc(cx-r_file, cy-r_file, cx+r_file, cy+r_file, start=90, extent=-360,
-                                         style='arc', outline='#21262d', width=width_r, tags='stats_arc')
-            if pct_file > 0:
-                self.gauge_canvas.create_arc(cx-r_file, cy-r_file, cx+r_file, cy+r_file, start=90, extent=-360*pct_file,
-                                             style='arc', outline=col_file, width=width_r, tags='stats_arc')
-        
-        # Font sizes - LARGER for dashboard readability
-        pct_font_size = 28 if self.mini_mode else 16
-        label_font_size = 7
-        
-        # Clean text rendering for mini mode (no clutter)
-        if self.mini_mode:
-            # Simple shadow for depth
-            self.gauge_canvas.create_text(cx+1, cy+1, text=f"{percent}%", 
-                                          font=('Segoe UI', pct_font_size, 'bold'), 
-                                          fill='#000000', tags='text')
-        
-        # Percentage text (centered)
-        y_offset = 0 if self.mini_mode else -6
-        text_color = '#ffffff' if self.mini_mode else self.colors['text']
-        self.gauge_canvas.create_text(cx, cy + y_offset, text=f"{percent}%", 
-                                      font=('Segoe UI', pct_font_size, 'bold'), fill=text_color, tags='text')
-        
-        # Only show CONTEXT label in full mode
-        if not self.mini_mode:
-            self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
-                                          font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
-        
-        # Show advanced stats labels in mini mode with LEADER LINES
-        if self.mini_mode and self.advanced_mode and self.current_session:
             stats_font_size = 9
             
             # Helper to draw leader line and text
@@ -449,7 +427,7 @@ class ContextMonitor:
             
             for radius, text_y, color, text in label_positions:
                 # Calculate rightmost point on ring at label's y-position
-                dy = text_y - 100  # Distance from center y
+                dy = text_y - 110  # Distance from center y (adjusted for semicircle)
                 
                 if abs(dy) <= radius:
                     # Point exists on this ring at this y
@@ -459,7 +437,7 @@ class ContextMonitor:
                 else:
                     # Fallback: use rightmost point of ring
                     x_start = 100 + radius
-                    y_start = 100
+                    y_start = 110
                 
                 draw_stat_label(x_start, y_start, text_x, text_y, text, color, 'w')
     
