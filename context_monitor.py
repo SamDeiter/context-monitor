@@ -353,41 +353,43 @@ class ContextMonitor:
             # Context window for normalization
             context_window = 200000
             
-            # Colors for stats (Distinct from Green/Yellow/Red of main gauge)
+            # Colors for stats
             col_input = '#58a6ff'   # Blue
             col_output = '#bc8cff'  # Purple
             col_file = '#39c5cf'    # Cyan
             
-            # Adjust radii to allow text to fit OUTSIDE the rings
+            # Adjust radii for spacing (Cleaner tracks)
             cx, cy = 80, 80
             r_in = 39    # Input (Inner)
-            r_out = 47   # Output (Middle)
-            r_file = 55  # File (Outer) - Max extent 80-55=25 to 80+55=135
+            r_out = 49   # Output (Middle) - Wider gap
+            r_file = 59  # File (Outer)
+            
+            width_r = 4  # Slightly thinner rings
             
             # 1. Input Gauge (Inner Ring) - Blue
             pct_in = min(1.0, estimated_input / context_window)
             self.gauge_canvas.create_arc(cx-r_in, cy-r_in, cx+r_in, cy+r_in, start=90, extent=-360,
-                                         style='arc', outline='#101418', width=5, tags='stats_arc')
+                                         style='arc', outline='#101418', width=width_r, tags='stats_arc')
             if pct_in > 0:
                 self.gauge_canvas.create_arc(cx-r_in, cy-r_in, cx+r_in, cy+r_in, start=90, extent=-360*pct_in,
-                                             style='arc', outline=col_input, width=5, tags='stats_arc')
+                                             style='arc', outline=col_input, width=width_r, tags='stats_arc')
             
             # 2. Output Gauge (Middle Ring) - Purple
             pct_out = min(1.0, estimated_output / context_window)
             self.gauge_canvas.create_arc(cx-r_out, cy-r_out, cx+r_out, cy+r_out, start=90, extent=-360,
-                                         style='arc', outline='#101418', width=5, tags='stats_arc')
+                                         style='arc', outline='#101418', width=width_r, tags='stats_arc')
             if pct_out > 0:
                 self.gauge_canvas.create_arc(cx-r_out, cy-r_out, cx+r_out, cy+r_out, start=90, extent=-360*pct_out,
-                                             style='arc', outline=col_output, width=5, tags='stats_arc')
+                                             style='arc', outline=col_output, width=width_r, tags='stats_arc')
                                              
             # 3. File Size (Outer Ring) - Cyan
             # Normalize file size to 50MB
             pct_file = min(1.0, file_size / (50 * 1024 * 1024))
             self.gauge_canvas.create_arc(cx-r_file, cy-r_file, cx+r_file, cy+r_file, start=90, extent=-360,
-                                         style='arc', outline='#101418', width=5, tags='stats_arc')
+                                         style='arc', outline='#101418', width=width_r, tags='stats_arc')
             if pct_file > 0:
                 self.gauge_canvas.create_arc(cx-r_file, cy-r_file, cx+r_file, cy+r_file, start=90, extent=-360*pct_file,
-                                             style='arc', outline=col_file, width=5, tags='stats_arc')
+                                             style='arc', outline=col_file, width=width_r, tags='stats_arc')
         
         # Font sizes
         pct_font_size = 22 if self.mini_mode else 14
@@ -416,25 +418,38 @@ class ContextMonitor:
             self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
                                           font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
         
-        # Show advanced stats labels in mini mode if enabled (updated positions)
+        # Show advanced stats labels in mini mode with LEADER LINES
         if self.mini_mode and self.advanced_mode and self.current_session:
-             # Reposition labels to align EXACTLY with their rings but OUTSIDE them
             stats_font_size = 8
             
-            # 1. Input (Blue) - Top Center (Above everything)
-            self.gauge_canvas.create_text(80, 12, text=f"IN:{estimated_input//1000}K", 
-                                         font=('Segoe UI', stats_font_size, 'bold'), 
-                                         fill=col_input, tags='text')
+            # Helper to draw leader line and text
+            def draw_stat_label(x_start, y_start, x_end, y_end, text, color, anchor='center'):
+                 self.gauge_canvas.create_line(x_start, y_start, x_end, y_end, fill=color, width=1, tags='text')
+                 self.gauge_canvas.create_text(x_end, y_end - (5 if y_end < y_start else -5), 
+                                              text=text, font=('Segoe UI', stats_font_size, 'bold'), 
+                                              fill=color, tags='text', anchor=anchor)
+
+            # 1. Input (Blue) - Top Center
+            # Line from r_in (Top) up
+            draw_stat_label(80, 80-r_in-2, 80, 15, f"IN:{estimated_input//1000}K", col_input, 's')
             
-            # 2. Output (Purple) - Bottom Right Corner
-            self.gauge_canvas.create_text(130, 145, text=f"OUT:{estimated_output//1000}K", 
-                                         font=('Segoe UI', stats_font_size, 'bold'), 
-                                         fill=col_output, tags='text')
+            # 2. Output (Purple) - Bottom Right (Angle 45)
+            # Line from r_out radiating out
+            import math
+            angle_rad = math.radians(45)
+            x_start = 80 + r_out * math.cos(angle_rad)
+            y_start = 80 + r_out * math.sin(angle_rad)
+            x_end = 80 + (r_out + 15) * math.cos(angle_rad)
+            y_end = 80 + (r_out + 15) * math.sin(angle_rad)
+            draw_stat_label(x_start, y_start, x_end, y_end, f"OUT:{estimated_output//1000}K", col_output, 'nw')
             
-            # 3. File (Cyan) - Bottom Left Corner
-            self.gauge_canvas.create_text(30, 145, text=f"{file_size / (1024*1024):.2f}MB", 
-                                         font=('Segoe UI', stats_font_size, 'bold'), 
-                                         fill=col_file, tags='text')
+            # 3. File (Cyan) - Bottom Left (Angle 135)
+            angle_rad = math.radians(135)
+            x_start = 80 + r_file * math.cos(angle_rad)
+            y_start = 80 + r_file * math.sin(angle_rad)
+            x_end = 80 + (r_file + 15) * math.cos(angle_rad)
+            y_end = 80 + (r_file + 15) * math.sin(angle_rad)
+            draw_stat_label(x_start, y_start, x_end, y_end, f"{file_size / (1024*1024):.2f}MB", col_file, 'ne')
     
     def draw_mini_gauge(self, canvas, percent, color):
         """Draw a small circular gauge for advanced stats"""
