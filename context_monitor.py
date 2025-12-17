@@ -265,42 +265,24 @@ class ContextMonitor:
         
         # Larger fonts for mini mode
         pct_font_size = 22 if self.mini_mode else 14
-        label_font_size = 8 if self.mini_mode else 7
+        label_font_size = 7
         
-        # Get the label text (project name in mini mode, "CONTEXT" in full mode)
-        if self.mini_mode and self.current_session:
-            label_text = self.get_project_name(self.current_session['id']).upper()
-            # Only split on natural word boundaries (hyphen or underscore)
-            if '-' in label_text:
-                parts = label_text.split('-', 1)
-                line1 = parts[0][:12]
-                line2 = parts[1][:12] if len(parts) > 1 else ''
-                label_text = line1 + '\n' + line2
-            elif '_' in label_text:
-                parts = label_text.split('_', 1)
-                line1 = parts[0][:12]
-                line2 = parts[1][:12] if len(parts) > 1 else ''
-                label_text = line1 + '\n' + line2
-            else:
-                # No natural split point - just truncate with ellipsis
-                if len(label_text) > 12:
-                    label_text = label_text[:11] + '…'
-        else:
-            label_text = "CONTEXT"
-        
-        # Drop shadow for mini mode (offset dark text behind)
+        # Drop shadow for mini mode (offset dark text behind) - only for percentage
         if self.mini_mode:
             shadow_offset = 2
             shadow_color = '#000000'
-            self.gauge_canvas.create_text(cx+shadow_offset, cy-8+shadow_offset, text=f"{percent}%", 
+            self.gauge_canvas.create_text(cx+shadow_offset, cy+shadow_offset, text=f"{percent}%", 
                                           font=('Segoe UI', pct_font_size, 'bold'), fill=shadow_color, tags='text')
-            self.gauge_canvas.create_text(cx+shadow_offset, cy+20+shadow_offset, text=label_text, 
-                                          font=('Segoe UI', label_font_size, 'bold'), fill=shadow_color, tags='text', justify='center')
         
-        self.gauge_canvas.create_text(cx, cy-8, text=f"{percent}%", 
+        # Draw percentage - centered in mini mode, slightly up in full mode
+        y_offset = 0 if self.mini_mode else -6
+        self.gauge_canvas.create_text(cx, cy + y_offset, text=f"{percent}%", 
                                       font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
-        self.gauge_canvas.create_text(cx, cy+20, text=label_text, 
-                                      font=('Segoe UI', label_font_size, 'bold'), fill=self.colors['text2'], tags='text', justify='center')
+        
+        # Only show CONTEXT label in full mode (removed from mini mode to prevent cutoff)
+        if not self.mini_mode:
+            self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
+                                          font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
         
     def get_sessions(self):
         sessions = []
@@ -927,28 +909,50 @@ class ToolTip:
         self.text = text
         self.colors = colors
         self.tooltip = None
-        self.widget.bind("<Enter>", self.enter)
-        self.widget.bind("<Leave>", self.leave)
+        self.id = None
+        self.widget.bind("<Enter>", self.schedule)
+        self.widget.bind("<Leave>", self.hide)
+        self.widget.bind("<ButtonPress>", self.hide)
 
-    def enter(self, event=None):
+    def schedule(self, event=None):
+        self.unschedule()
+        self.id = self.widget.after(500, self.show)
+
+    def unschedule(self):
+        if self.id:
+            self.widget.after_cancel(self.id)
+            self.id = None
+
+    def show(self, event=None):
+        if self.tooltip:
+            return
+            
         x, y, _, _ = self.widget.bbox("insert") if self.widget.bbox("insert") else (0, 0, 0, 0)
         x += self.widget.winfo_rootx() + 25
         y += self.widget.winfo_rooty() + 20
         
-        self.tooltip = tk.Toplevel(self.widget)
-        self.tooltip.wm_overrideredirect(True)
-        self.tooltip.attributes('-topmost', True)
-        self.tooltip.wm_geometry(f"+{x}+{y}")
-        
-        label = tk.Label(self.tooltip, text=self.text, justify='left',
-                       bg=self.colors['bg3'], fg=self.colors['text'],
-                       relief='solid', borderwidth=1,
-                       font=("Segoe UI", 8))
-        label.pack()
+        # Prevent tooltip from being created if widget is not visible
+        try:
+            self.tooltip = tk.Toplevel(self.widget)
+            self.tooltip.wm_overrideredirect(True)
+            self.tooltip.wm_geometry(f"+{x}+{y}")
+            self.tooltip.attributes('-topmost', True)
+            
+            label = tk.Label(self.tooltip, text=self.text, justify='left',
+                           bg=self.colors['bg3'], fg=self.colors['text'],
+                           relief='solid', borderwidth=1,
+                           font=("Segoe UI", 8))
+            label.pack()
+        except:
+            self.hide()
 
-    def leave(self, event=None):
+    def hide(self, event=None):
+        self.unschedule()
         if self.tooltip:
-            self.tooltip.destroy()
+            try:
+                self.tooltip.destroy()
+            except:
+                pass
             self.tooltip = None
 
 if __name__ == '__main__':
