@@ -265,7 +265,6 @@ class ContextMonitor:
         
         # Larger fonts for mini mode
         pct_font_size = 22 if self.mini_mode else 14
-        label_font_size = 7
         
         # Drop shadow for mini mode (offset dark text behind) - only for percentage
         if self.mini_mode:
@@ -274,15 +273,9 @@ class ContextMonitor:
             self.gauge_canvas.create_text(cx+shadow_offset, cy+shadow_offset, text=f"{percent}%", 
                                           font=('Segoe UI', pct_font_size, 'bold'), fill=shadow_color, tags='text')
         
-        # Draw percentage - centered in mini mode, slightly up in full mode
-        y_offset = 0 if self.mini_mode else -6
-        self.gauge_canvas.create_text(cx, cy + y_offset, text=f"{percent}%", 
+        # Draw percentage - centered in both modes (removed label text to prevent cutoff)
+        self.gauge_canvas.create_text(cx, cy, text=f"{percent}%", 
                                       font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
-        
-        # Only show CONTEXT label in full mode (removed from mini mode to prevent cutoff)
-        if not self.mini_mode:
-            self.gauge_canvas.create_text(cx, cy+14, text="CONTEXT", 
-                                          font=('Segoe UI', label_font_size), fill=self.colors['muted'], tags='text')
         
     def get_sessions(self):
         sessions = []
