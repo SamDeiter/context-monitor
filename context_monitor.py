@@ -15,6 +15,15 @@ import sys
 import atexit
 import ctypes
 import platform
+import threading
+import sys
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    HAS_TRAY = True
+except ImportError:
+    HAS_TRAY = False
+    print("System tray dependencies missing. Run: pip install pystray Pillow")
 
 class ContextMonitor:
     def __init__(self):
@@ -49,11 +58,15 @@ class ContextMonitor:
         # State
         self.drag_x = 0
         self.drag_y = 0
+        self.drag_y = 0
         self.current_session = None
+        self.selected_session_id = None  # Manually selected session
         self.handoff_copied = False
         self.mini_mode = self.settings.get('mini_mode', False)
         self.flash_state = False
         self.current_percent = 0
+        self.tray_icon = None
+        self.tray_thread = None
         
         # Project name cache
         self.project_name_cache = {}
@@ -61,6 +74,8 @@ class ContextMonitor:
         
         # Paths
         self.conversations_dir = Path.home() / '.gemini' / 'antigravity' / 'conversations'
+        self.history_file = Path.home() / '.gemini' / 'antigravity' / 'scratch' / 'token-widget' / 'history.json'
+
         
         # Hardware Scan
         self.total_ram_mb = self.get_total_memory()
@@ -150,7 +165,9 @@ class ContextMonitor:
             close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
                                 bg=self.colors['bg3'], fg=self.colors['text2'], cursor='hand2')
             close_btn.pack(side='right', padx=5)
-            close_btn.bind('<Button-1>', lambda e: self.cleanup_and_exit())
+            # Bind close to minimize if tray is available, else exit
+            close_action = self.minimize_to_tray if HAS_TRAY else self.cleanup_and_exit
+            close_btn.bind('<Button-1>', lambda e: close_action())
             
             for w in [header, title]:
                 w.bind('<Button-1>', self.start_drag)
@@ -436,6 +453,16 @@ $sb.ToString()
             return
             
         self.current_session = sessions[0]
+        
+        # specific session selection logic
+        if self.selected_session_id:
+            found = next((s for s in sessions if s['id'] == self.selected_session_id), None)
+            if found:
+                self.current_session = found
+            else:
+                # Session disappeared, reset selection
+                self.selected_session_id = None
+
         context_window = 200000
         tokens_used = self.current_session['estimated_tokens'] // 10
         tokens_left = max(0, context_window - tokens_used)
@@ -444,10 +471,17 @@ $sb.ToString()
         self.current_percent = percent
         self.draw_gauge(percent)
         
+        # Save history (throttle: save max once per 5 mins)
+        self.save_history(self.current_session['id'], tokens_used)
+        
         if not self.mini_mode:
             self.tokens_label.config(text=f"{tokens_left:,}")
             project_name = self.get_project_name(self.current_session['id'])
             self.session_label.config(text=project_name)
+            
+            # Update tray icon
+            if HAS_TRAY:
+                self.update_tray_icon()
             
             # Update status and auto-copy at 80%
             if percent >= 80:
@@ -514,6 +548,12 @@ Read those logs to understand what we were working on, then continue helping me.
             project = self.get_project_name(self.current_session['id'])
             print(f"[Refresh] Detected project: {project}")
         
+        
+    def switch_session(self, session_id):
+        """Manually switch to a specific session"""
+        self.selected_session_id = session_id
+        self.load_session()
+        
     def start_drag(self, event):
         self.drag_x = event.x
         self.drag_y = event.y
@@ -568,6 +608,100 @@ Read those logs to understand what we were working on, then continue helping me.
             self.load_session()
         self.save_settings()
     
+    
+    def load_history(self):
+        try:
+            if self.history_file.exists():
+                with open(self.history_file, 'r') as f:
+                    return json.load(f)
+        except:
+            pass
+        return {}
+
+    def save_history(self, session_id, tokens):
+        import time
+        now = time.time()
+        
+        # Throttle: Check last save
+        if not hasattr(self, 'last_history_save'):
+            self.last_history_save = 0
+            
+        if now - self.last_history_save < 300: # 5 mins
+            return
+            
+        try:
+            data = self.load_history()
+            if session_id not in data:
+                data[session_id] = []
+            
+            # Add point
+            data[session_id].append({
+                'ts': now,
+                'tokens': tokens
+            })
+            
+            # Keep last 100 points per session
+            if len(data[session_id]) > 100:
+                data[session_id] = data[session_id][-100:]
+                
+            self.history_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.history_file, 'w') as f:
+                json.dump(data, f)
+                
+            self.last_history_save = now
+        except Exception as e:
+            print(f"History save error: {e}")
+
+    def show_history(self):
+        """Show usage history graph"""
+        if not self.current_session:
+            return
+            
+        sid = self.current_session['id']
+        data = self.load_history().get(sid, [])
+        
+        if not data:
+            messagebox.showinfo("History", "Not enough data collected yet.")
+            return
+
+        # Create window
+        win = tk.Toplevel(self.root)
+        win.title("Token Usage History")
+        win.geometry("400x300")
+        win.configure(bg=self.colors['bg'])
+        
+        canvas = tk.Canvas(win, width=380, height=250, bg=self.colors['bg2'], highlightthickness=0)
+        canvas.pack(padx=10, pady=10)
+        
+        # Draw axes
+        w = 380
+        h = 250
+        padding = 20
+        
+        # Normalize data
+        max_tokens = 200000
+        min_ts = data[0]['ts']
+        max_ts = data[-1]['ts']
+        time_range = max_ts - min_ts
+        if time_range == 0: time_range = 1
+        
+        points = []
+        for p in data:
+            x = padding + (p['ts'] - min_ts) / time_range * (w - 2*padding)
+            y = h - (padding + (p['tokens'] / max_tokens) * (h - 2*padding))
+            points.append((x, y))
+            
+        # Draw line
+        if len(points) > 1:
+            canvas.create_line(points, fill=self.colors['blue'], width=2, smooth=True)
+            
+        # Draw limit line (80%)
+        limit_y = h - (padding + 0.8 * (h - 2*padding))
+        canvas.create_line(padding, limit_y, w-padding, limit_y, fill=self.colors['red'], dash=(4, 4))
+        canvas.create_text(w-padding, limit_y-10, text="80% Limit", fill=self.colors['red'], font=('Segoe UI', 8), anchor='e')
+
+        tk.Label(win, text=f"History for {self.get_project_name(sid)}", bg=self.colors['bg'], fg=self.colors['text']).pack()
+        
     def flash_warning(self):
         """Flash the widget in mini mode when approaching limit"""
         if self.mini_mode and self.current_percent >= 60:
@@ -647,11 +781,35 @@ Read those logs to understand what we were working on, then continue helping me.
         # Diagnostics section
         menu.add_command(label="  📊  Show Diagnostics", command=self.show_diagnostics)
         menu.add_command(label="  📈  Advanced Token Stats", command=self.show_advanced_stats)
+        menu.add_command(label="  📅  Usage History Graph", command=self.show_history)
         menu.add_separator()
         
         # Actions section
         menu.add_command(label="  🧹  Clean Old Conversations", command=self.cleanup_old_conversations)
         menu.add_command(label="  🔄  Restart Antigravity", command=self.restart_antigravity)
+        menu.add_separator()
+        
+        # Sessions submenu
+        sessions_menu = tk.Menu(menu, tearoff=0,
+                              bg=self.colors['bg2'],
+                              fg=self.colors['text'],
+                              activebackground=self.colors['blue'],
+                              activeforeground='white')
+        
+        current_id = self.current_session['id'] if self.current_session else None
+        
+        # Get top 5 sessions
+        sessions = self.get_sessions()[:5]
+        for s in sessions:
+            # Format: "Project Name (ID...)" or "ID..."
+            name = self.get_project_name(s['id'])
+            label = f"{'✓ ' if s['id'] == current_id else '  '}{name}"
+            # Use partial to capture the loop variable
+            from functools import partial
+            sessions_menu.add_command(label=label, 
+                                    command=partial(self.switch_session, s['id']))
+            
+        menu.add_cascade(label="  🔀  Switch Session", menu=sessions_menu)
         menu.add_separator()
         
         # Mode toggle
@@ -898,7 +1056,72 @@ Read those logs to understand what we were working on, then continue helping me.
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to generate stats: {e}")
-    
+    # ==================== SYSTEM TRAY ====================
+
+    def create_tray_icon(self, color):
+        """Create a circle icon for the tray"""
+        width = 64
+        height = 64
+        image = Image.new('RGB', (width, height), (0, 0, 0))
+        dc = ImageDraw.Draw(image)
+        dc.ellipse((0, 0, width, height), fill=color)
+        return image
+
+    def setup_tray(self):
+        """Initialize system tray icon"""
+        if not HAS_TRAY:
+            return
+
+        def on_open(icon, item):
+            self.root.after(0, self.restore_from_tray)
+
+        def on_exit(icon, item):
+            self.root.after(0, self.cleanup_and_exit)
+
+        menu = pystray.Menu(
+            pystray.MenuItem('Show Context Monitor', on_open, default=True),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem('Exit', on_exit)
+        )
+
+        self.tray_icon = pystray.Icon(
+            "ContextMonitor",
+            self.create_tray_icon(self.colors['green']),
+            "Context Monitor",
+            menu
+        )
+
+    def run_tray(self):
+        """Run tray icon in background thread"""
+        if self.tray_icon:
+            self.tray_icon.run()
+
+    def update_tray_icon(self):
+        """Update tray icon color based on usage"""
+        if not self.tray_icon:
+            return
+            
+        color = self.colors['green']
+        if self.current_percent >= 80:
+            color = self.colors['red']
+        elif self.current_percent >= 60:
+            color = self.colors['yellow']
+            
+        # We need to create a new icon image
+        self.tray_icon.icon = self.create_tray_icon(color)
+        self.tray_icon.title = f"Context Monitor: {self.current_percent}%"
+
+    def minimize_to_tray(self):
+        """Hide window and show notification if first time"""
+        self.root.withdraw()
+        
+    def restore_from_tray(self):
+        """Show window"""
+        self.root.deiconify()
+        self.root.lift()
+
+    # ==================== CLEANUP & RUN ====================
+
     def _cleanup_processes(self):
         """Clean up any related processes on exit"""
         try:
@@ -938,6 +1161,8 @@ Read those logs to understand what we were working on, then continue helping me.
                     pass
             
             # Destroy the window
+            if self.tray_icon:
+                self.tray_icon.stop()
             self.root.quit()
             self.root.destroy()
             
@@ -950,6 +1175,13 @@ Read those logs to understand what we were working on, then continue helping me.
             os._exit(0)
     
     def run(self):
+        self.root.protocol("WM_DELETE_WINDOW", self.minimize_to_tray if HAS_TRAY else self.cleanup_and_exit)
+        
+        if HAS_TRAY:
+            self.setup_tray()
+            self.tray_thread = threading.Thread(target=self.run_tray, daemon=True)
+            self.tray_thread.start()
+            
         self.root.mainloop()
 
 class ToolTip:
