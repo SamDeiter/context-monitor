@@ -72,7 +72,7 @@ class ContextMonitor:
         
         self.setup_ui()
         self.load_session()
-        self.root.after(5000, self.auto_refresh)
+        self.root.after(15000, self.auto_refresh)
         self.root.after(500, self.flash_warning)
         
     def setup_ui(self):
@@ -374,50 +374,50 @@ $sb.ToString()
         now = time.time()
         if session_id in self.project_name_cache:
             if session_id in self.project_name_timestamp:
-                if now - self.project_name_timestamp[session_id] < 30:
+                if now - self.project_name_timestamp[session_id] < 60:
                     return self.project_name_cache[session_id]
         
         project_name = None
+
+        # Strategy 1: Parse from conversation file (Fastest & non-intrusive)
+        try:
+            pb_file = self.conversations_dir / f"{session_id}.pb"
+            if pb_file.exists():
+                # Read file content and search for project patterns
+                content = pb_file.read_bytes()
+                text = content.decode('utf-8', errors='ignore')
+                
+                # Look for CorpusName pattern (most reliable)
+                patterns = [
+                    r'CorpusName[:\s]+([A-Za-z0-9_-]+/[A-Za-z0-9_-]+)',  # user/repo format
+                    r'([A-Za-z0-9_-]+/[A-Za-z0-9_-]+)\s+-\>',  # URI mapping format
+                    r'Documents[/\\]GitHub[/\\]([A-Za-z0-9_-]+)',  # GitHub folder path
+                    r'Active Document:.*GitHub[/\\]([A-Za-z0-9_-]+)[/\\]',  # Active document path
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        name = match.group(1)
+                        # Extract just the repo name if it's user/repo format
+                        if '/' in name:
+                            name = name.split('/')[-1]
+                        project_name = name
+                        break
+        except Exception as e:
+            print(f"Error getting project name from file: {e}")
+
+        # Strategy 2: Check active VS Code window (Slower, uses subprocess)
+        if not project_name:
+            vscode_project = self.get_active_vscode_project()
+            if vscode_project:
+                project_name = vscode_project
         
-        # Strategy 1: Check active VS Code window (most reliable for "active" project)
-        vscode_project = self.get_active_vscode_project()
-        if vscode_project:
-            project_name = vscode_project
-        
-        # Strategy 2: Check recently modified GitHub folder
+        # Strategy 3: Check recently modified GitHub folder
         if not project_name:
             recent_project = self.get_recently_modified_project()
             if recent_project:
                 project_name = recent_project
-        
-        # Strategy 3: Parse from conversation file
-        if not project_name:
-            try:
-                pb_file = self.conversations_dir / f"{session_id}.pb"
-                if pb_file.exists():
-                    # Read file content and search for project patterns
-                    content = pb_file.read_bytes()
-                    text = content.decode('utf-8', errors='ignore')
-                    
-                    # Look for CorpusName pattern (most reliable)
-                    patterns = [
-                        r'CorpusName[:\s]+([A-Za-z0-9_-]+/[A-Za-z0-9_-]+)',  # user/repo format
-                        r'([A-Za-z0-9_-]+/[A-Za-z0-9_-]+)\s+-\>',  # URI mapping format
-                        r'Documents[/\\]GitHub[/\\]([A-Za-z0-9_-]+)',  # GitHub folder path
-                        r'Active Document:.*GitHub[/\\]([A-Za-z0-9_-]+)[/\\]',  # Active document path
-                    ]
-                    
-                    for pattern in patterns:
-                        match = re.search(pattern, text)
-                        if match:
-                            name = match.group(1)
-                            # Extract just the repo name if it's user/repo format
-                            if '/' in name:
-                                name = name.split('/')[-1]
-                            project_name = name
-                            break
-            except Exception as e:
-                print(f"Error getting project name from file: {e}")
         
         # Cache the result
         if project_name:
@@ -493,7 +493,7 @@ Read those logs to understand what we were working on, then continue helping me.
             
     def auto_refresh(self):
         self.load_session()
-        self.root.after(5000, self.auto_refresh)
+        self.root.after(15000, self.auto_refresh)
     
     def force_refresh(self):
         """Force refresh project detection by clearing cache"""
