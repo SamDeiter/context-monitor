@@ -11,6 +11,8 @@ import json
 import re
 import subprocess
 import os
+import sys
+import atexit
 import ctypes
 import platform
 
@@ -63,6 +65,10 @@ class ContextMonitor:
         # Hardware Scan
         self.total_ram_mb = self.get_total_memory()
         self.thresholds = self.calculate_thresholds()
+        
+        # Register cleanup on exit
+        atexit.register(self._cleanup_processes)
+        self.root.protocol("WM_DELETE_WINDOW", self.cleanup_and_exit)
         
         self.setup_ui()
         self.load_session()
@@ -144,7 +150,7 @@ class ContextMonitor:
             close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
                                 bg=self.colors['bg3'], fg=self.colors['text2'], cursor='hand2')
             close_btn.pack(side='right', padx=5)
-            close_btn.bind('<Button-1>', lambda e: self.root.destroy())
+            close_btn.bind('<Button-1>', lambda e: self.cleanup_and_exit())
             
             for w in [header, title]:
                 w.bind('<Button-1>', self.start_drag)
@@ -655,7 +661,7 @@ Read those logs to understand what we were working on, then continue helping me.
             menu.add_command(label="  ◱  Collapse to Mini Mode", command=self.toggle_mini_mode)
         
         menu.add_separator()
-        menu.add_command(label="  ✕  Exit", command=self.root.destroy)
+        menu.add_command(label="  ✕  Exit", command=self.cleanup_and_exit)
         
         try:
             menu.tk_popup(event.x_root, event.y_root)
@@ -892,6 +898,56 @@ Read those logs to understand what we were working on, then continue helping me.
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to generate stats: {e}")
+    
+    def _cleanup_processes(self):
+        """Clean up any related processes on exit"""
+        try:
+            # Get current process ID to avoid killing ourselves prematurely
+            current_pid = os.getpid()
+            
+            # Find and terminate any orphaned pythonw processes running context_monitor
+            cmd = 'tasklist /FI "IMAGENAME eq pythonw.exe" /FO CSV /NH'
+            result = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=5)
+            
+            if result.stdout:
+                for line in result.stdout.splitlines():
+                    if 'pythonw' in line.lower():
+                        parts = line.replace('"', '').split(',')
+                        if len(parts) >= 2:
+                            try:
+                                pid = int(parts[1])
+                                if pid != current_pid:
+                                    subprocess.run(['taskkill', '/F', '/PID', str(pid)], 
+                                                 capture_output=True, timeout=3)
+                            except (ValueError, subprocess.TimeoutExpired):
+                                pass
+        except Exception as e:
+            print(f"Cleanup error (non-fatal): {e}")
+    
+    def cleanup_and_exit(self):
+        """Properly cleanup and exit the application"""
+        try:
+            # Save settings before exit
+            self.save_settings()
+            
+            # Cancel any pending after callbacks
+            for after_id in self.root.tk.call('after', 'info'):
+                try:
+                    self.root.after_cancel(after_id)
+                except:
+                    pass
+            
+            # Destroy the window
+            self.root.quit()
+            self.root.destroy()
+            
+        except Exception as e:
+            print(f"Exit error: {e}")
+        finally:
+            # Force cleanup and exit
+            self._cleanup_processes()
+            # Use os._exit to ensure all threads are terminated
+            os._exit(0)
     
     def run(self):
         self.root.mainloop()
