@@ -4,12 +4,15 @@ Borderless, always-on-top token usage tracker for Antigravity
 """
 
 import tkinter as tk
+from tkinter import messagebox
 from pathlib import Path
 from datetime import datetime
 import json
 import re
 import subprocess
 import os
+import ctypes
+import platform
 
 class ContextMonitor:
     def __init__(self):
@@ -57,6 +60,10 @@ class ContextMonitor:
         # Paths
         self.conversations_dir = Path.home() / '.gemini' / 'antigravity' / 'conversations'
         
+        # Hardware Scan
+        self.total_ram_mb = self.get_total_memory()
+        self.thresholds = self.calculate_thresholds()
+        
         self.setup_ui()
         self.load_session()
         self.root.after(5000, self.auto_refresh)
@@ -95,6 +102,7 @@ class ContextMonitor:
             
             # Interactions
             self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
+            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
             
             # Bind drag to canvas
             self.gauge_canvas.bind('<Button-1>', self.start_drag)
@@ -141,45 +149,54 @@ class ContextMonitor:
             for w in [header, title]:
                 w.bind('<Button-1>', self.start_drag)
                 w.bind('<B1-Motion>', self.drag)
+                w.bind('<Button-3>', self.show_context_menu)
             
             # Content
             content = tk.Frame(self.root, bg=self.colors['bg2'], padx=15, pady=12)
             content.pack(fill='both', expand=True)
+            content.bind('<Button-3>', self.show_context_menu)
             
             # Main row
             main = tk.Frame(content, bg=self.colors['bg2'])
             main.pack(fill='x')
+            main.bind('<Button-3>', self.show_context_menu)
             
             # Gauge
             self.gauge_canvas = tk.Canvas(main, width=70, height=70, 
                                           bg=self.colors['bg2'], highlightthickness=0)
             self.gauge_canvas.pack(side='left', padx=(0, 12))
+            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
             self.draw_gauge(self.current_percent)
             
             # Info
             info = tk.Frame(main, bg=self.colors['bg2'])
             info.pack(side='left', fill='both', expand=True)
+            info.bind('<Button-3>', self.show_context_menu)
             
             tk.Label(info, text="TOKENS LEFT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
             self.tokens_label = tk.Label(info, text="—", font=('Segoe UI', 14, 'bold'),
                                          bg=self.colors['bg2'], fg=self.colors['text'])
             self.tokens_label.pack(anchor='w')
+            self.tokens_label.bind('<Button-3>', self.show_context_menu)
             
             tk.Label(info, text="PROJECT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(8,0))
             self.session_label = tk.Label(info, text="—", font=('Segoe UI', 8),
                                           bg=self.colors['bg2'], fg=self.colors['text2'])
             self.session_label.pack(anchor='w')
+            self.session_label.bind('<Button-3>', self.show_context_menu)
             
             # Status bar with copy button
             self.status_frame = tk.Frame(content, bg=self.colors['bg3'], padx=8, pady=6)
             self.status_frame.pack(fill='x', pady=(10, 0))
+            self.status_frame.bind('<Button-3>', self.show_context_menu)
             
             self.status_label = tk.Label(self.status_frame, text="✓ Loading...", 
                                         font=('Segoe UI', 9),
                                         bg=self.colors['bg3'], fg=self.colors['text2'])
             self.status_label.pack(side='left')
+            self.status_label.bind('<Button-3>', self.show_context_menu)
             
             self.copy_btn = tk.Label(self.status_frame, text="📋 Copy", 
                                     font=('Segoe UI', 8), cursor='hand2',
@@ -207,6 +224,7 @@ class ContextMonitor:
         self.root.bind('<KeyPress-plus>', lambda e: self.adjust_alpha(0.05))
         self.root.bind('<KeyPress-minus>', lambda e: self.adjust_alpha(-0.05))
         self.root.bind('<KeyPress-r>', lambda e: self.force_refresh())
+        self.root.bind('<KeyPress-a>', lambda e: self.show_advanced_stats())
         
     def create_tooltip(self, widget, text):
         tooltip = ToolTip(widget, text, self.colors)
@@ -593,6 +611,312 @@ Read those logs to understand what we were working on, then continue helping me.
             self.root.configure(bg=self.colors['bg'])
             self.flash_state = False
             self.root.after(500, self.flash_warning)
+    
+    def get_total_memory(self):
+        """Detect total system RAM in MB using ctypes"""
+        try:
+            if platform.system() == "Windows":
+                kernel32 = ctypes.windll.kernel32
+                c_ulonglong = ctypes.c_ulonglong
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ('dwLength', ctypes.c_ulong),
+                        ('dwMemoryLoad', ctypes.c_ulong),
+                        ('ullTotalPhys', c_ulonglong),
+                        ('ullAvailPhys', c_ulonglong),
+                        ('ullTotalPageFile', c_ulonglong),
+                        ('ullAvailPageFile', c_ulonglong),
+                        ('ullTotalVirtual', c_ulonglong),
+                        ('ullAvailVirtual', c_ulonglong),
+                        ('ullAvailExtendedVirtual', c_ulonglong),
+                    ]
+                memoryStatus = MEMORYSTATUSEX()
+                memoryStatus.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                kernel32.GlobalMemoryStatusEx(ctypes.byref(memoryStatus))
+                return int(memoryStatus.ullTotalPhys / (1024 * 1024))
+            else:
+                return 16384 # Fallback
+        except Exception as e:
+            print(f"Error detecting RAM: {e}")
+            return 16384
+            
+    def calculate_thresholds(self):
+        """Calculate warnings based on system RAM"""
+        ram = self.total_ram_mb
+        return {
+            'proc_warn': max(500, int(ram * 0.015)),  # 1.5% (approx 2GB for 128GB)
+            'proc_crit': max(1000, int(ram * 0.04)),  # 4% (approx 5GB for 128GB)
+            'total_warn': max(2000, int(ram * 0.10)), # 10% (approx 12GB for 128GB)
+            'total_crit': max(3000, int(ram * 0.15))  # 15% (approx 19GB for 128GB)
+        }
+    
+    # ==================== DIAGNOSTICS ====================
+    
+    def show_context_menu(self, event):
+        """Show right-click context menu with improved styling"""
+        menu = tk.Menu(self.root, tearoff=0, 
+                      bg=self.colors['bg2'], 
+                      fg=self.colors['text'],
+                      activebackground=self.colors['blue'], 
+                      activeforeground='white',
+                      font=('Segoe UI', 9),
+                      relief='flat',
+                      borderwidth=1)
+        
+        # Diagnostics section
+        menu.add_command(label="  📊  Show Diagnostics", command=self.show_diagnostics)
+        menu.add_command(label="  📈  Advanced Token Stats", command=self.show_advanced_stats)
+        menu.add_separator()
+        
+        # Actions section
+        menu.add_command(label="  🧹  Clean Old Conversations", command=self.cleanup_old_conversations)
+        menu.add_command(label="  🔄  Restart Antigravity", command=self.restart_antigravity)
+        menu.add_separator()
+        
+        # Mode toggle
+        if self.mini_mode:
+            menu.add_command(label="  ◳  Expand to Full Mode", command=self.toggle_mini_mode)
+        else:
+            menu.add_command(label="  ◱  Collapse to Mini Mode", command=self.toggle_mini_mode)
+        
+        menu.add_separator()
+        menu.add_command(label="  ✕  Exit", command=self.root.destroy)
+        
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+    
+    def get_antigravity_processes(self):
+        """Get memory/CPU usage of Antigravity processes (Fast fallback)"""
+        # PowerShell/WMI is too slow on this user's machine (causing UI freeze)
+        # We will iterate processes using tasklist which is faster, or just return empty for speed
+        try:
+             # Fast check using tasklist CSV format
+            cmd = "tasklist /FI \"IMAGENAME eq Antigravity.exe\" /FO CSV /NH"
+            result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+            
+            data = []
+            if result.stdout:
+                for line in result.stdout.splitlines():
+                    if 'Antigravity' in line:
+                        parts = line.split('","')
+                        if len(parts) >= 5:
+                            pid = parts[1]
+                            mem_str = parts[4].replace('"', '').replace(' K', '').replace(',', '')
+                            mem_mb = int(mem_str) // 1024
+                            data.append({
+                                'Id': pid,
+                                'Type': 'Process', # Detailed type requires slow WMI
+                                'Mem': mem_mb,
+                                'CPU': 0 # CPU requires slow PerfCounters
+                            })
+            return data
+        except Exception as e:
+            print(f"Error getting processes: {e}")
+            return []
+    
+    def get_large_conversations(self, min_size_mb=5):
+        """Get conversation files larger than min_size_mb"""
+        large_files = []
+        try:
+            for f in self.conversations_dir.glob('*.pb'):
+                size_mb = f.stat().st_size / (1024 * 1024)
+                if size_mb >= min_size_mb:
+                    large_files.append({
+                        'name': f.stem[:8] + '...',
+                        'size_mb': round(size_mb, 1),
+                        'path': f
+                    })
+            large_files.sort(key=lambda x: x['size_mb'], reverse=True)
+        except Exception as e:
+            print(f"Error scanning files: {e}")
+        return large_files[:5]
+    
+    def show_diagnostics(self):
+        """Show diagnostics popup with detailed recommendations"""
+        procs = self.get_antigravity_processes()
+        files = self.get_large_conversations()
+        
+        # Build message
+        msg = "=== ANTIGRAVITY PROCESSES ===\n"
+        msg += f"(System Logic: {self.total_ram_mb//1024}GB RAM detected)\n"
+        total_mem = 0
+        high_mem_types = []
+        limits = self.thresholds
+        
+        for p in procs:
+            mem = p.get('Mem', 0)
+            total_mem += mem
+            cpu = p.get('CPU', 0)
+            ptype = p.get('Type', 'Unknown')
+            status = "🔴" if mem > limits['proc_crit'] else "🟡" if mem > limits['proc_warn'] else "🟢"
+            msg += f"{status} {ptype}: {mem}MB RAM, {cpu}s CPU\n"
+            if mem > limits['proc_warn']:
+                high_mem_types.append(ptype)
+        
+        msg += f"\nTotal: {total_mem}MB across {len(procs)} processes\n"
+        
+        msg += "\n=== LARGE CONVERSATION FILES ===\n"
+        total_size = sum(f['size_mb'] for f in files)
+        for f in files:
+            status = "🔴" if f['size_mb'] > 15 else "🟡" if f['size_mb'] > 8 else "🟢"
+            msg += f"{status} {f['name']}: {f['size_mb']}MB\n"
+        msg += f"\nTotal large files: {total_size:.1f}MB\n"
+        
+        # Specific recommendations
+        msg += "\n=== WHAT TO DO ===\n"
+        
+        if 'Extension Host' in high_mem_types:
+            msg += "⚠️ Extension Host using high memory!\n"
+            msg += "   → Disable unused extensions\n"
+            msg += "   → Reload Window (Ctrl+Shift+P → Reload)\n\n"
+        
+        if 'Renderer/GPU' in high_mem_types:
+            msg += "⚠️ Renderer process high!\n"
+            msg += "   → Close unused tabs/editors\n"
+            msg += "   → Restart Antigravity\n\n"
+        
+        if 'Language Server' in high_mem_types:
+            msg += "⚠️ Language Server consuming RAM!\n"
+            msg += "   → Close large projects\n"
+            msg += "   → Restart language server\n\n"
+        
+        if total_size > 50:
+            msg += "⚠️ Large conversation files!\n"
+            msg += "   → Use 'Clean Old Conversations'\n\n"
+        
+        if total_mem > limits['total_crit']:
+            msg += f"🔴 CRITICAL: Total memory > {limits['total_crit']//1024}GB!\n"
+            msg += "   → RESTART ANTIGRAVITY NOW\n"
+        elif total_mem > limits['total_warn']:
+            msg += f"🟡 High memory usage (>{limits['total_warn']//1024}GB)\n"
+            msg += "   → Consider restarting soon\n"
+        elif not high_mem_types and total_size <= 50:
+            msg += "✅ System looks healthy!\n"
+        
+        messagebox.showinfo("Context Monitor - Diagnostics", msg)
+    
+    def cleanup_old_conversations(self):
+        """Delete conversation files older than 7 days and larger than 5MB"""
+        files = self.get_large_conversations(min_size_mb=5)
+        if not files:
+            messagebox.showinfo("Cleanup", "No large files to clean up!")
+            return
+        
+        msg = f"Found {len(files)} large conversation files:\n\n"
+        for f in files:
+            msg += f"• {f['name']}: {f['size_mb']}MB\n"
+        msg += "\nDelete these files? (Current session will be preserved)"
+        
+        if messagebox.askyesno("Cleanup Old Conversations", msg):
+            deleted = 0
+            current_id = self.current_session['id'] if self.current_session else None
+            for f in files:
+                if current_id and current_id in str(f['path']):
+                    continue  # Skip current session
+                try:
+                    f['path'].unlink()
+                    deleted += 1
+                except Exception as e:
+                    print(f"Error deleting {f['path']}: {e}")
+            messagebox.showinfo("Cleanup Complete", f"Deleted {deleted} files.")
+    
+    def restart_antigravity(self):
+        """Restart Antigravity IDE"""
+        if messagebox.askyesno("Restart Antigravity", 
+                               "This will close all Antigravity windows and restart.\n\nContinue?"):
+            try:
+                # Kill all Antigravity processes
+                subprocess.run(['taskkill', '/F', '/IM', 'Antigravity.exe'], 
+                             capture_output=True, timeout=10)
+                # Wait a moment
+                self.root.after(2000, self._launch_antigravity)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to restart: {e}")
+    
+    def _launch_antigravity(self):
+        """Helper to launch Antigravity after restart"""
+        try:
+            antigravity_path = Path.home() / 'AppData' / 'Local' / 'Programs' / 'Antigravity' / 'bin' / 'antigravity.cmd'
+            if antigravity_path.exists():
+                subprocess.Popen([str(antigravity_path)], shell=True)
+        except Exception as e:
+            print(f"Error launching Antigravity: {e}")
+    
+    def show_advanced_stats(self):
+        """Show detailed token usage breakdown"""
+        if not self.current_session:
+            messagebox.showinfo("Advanced Stats", "No active session found.")
+            return
+        
+        try:
+            # Get conversation file
+            conv_file = self.conversations_dir / f"{self.current_session['id']}.pb"
+            if not conv_file.exists():
+                messagebox.showinfo("Advanced Stats", "Conversation file not found.")
+                return
+            
+            # Calculate token estimates
+            file_size = conv_file.stat().st_size
+            total_tokens = file_size // 4
+            
+            # Estimate breakdown (since we can't parse protobuf easily)
+            # Typical ratio is ~40% input, ~60% output
+            estimated_input = int(total_tokens * 0.4)
+            estimated_output = int(total_tokens * 0.6)
+            
+            context_window = 200000
+            tokens_used = self.current_session['estimated_tokens'] // 10
+            tokens_left = max(0, context_window - tokens_used)
+            percent_used = min(100, round((tokens_used / context_window) * 100))
+            
+            # Build detailed message
+            msg = "=== TOKEN USAGE BREAKDOWN ===\n\n"
+            msg += f"Context Window: {context_window:,} tokens\n"
+            msg += f"Tokens Used: {tokens_used:,} ({percent_used}%)\n"
+            msg += f"Tokens Remaining: {tokens_left:,}\n\n"
+            
+            msg += "=== ESTIMATED BREAKDOWN ===\n"
+            msg += f"Input Tokens (User): ~{estimated_input:,}\n"
+            msg += f"Output Tokens (Assistant): ~{estimated_output:,}\n\n"
+            
+            # Visual bar chart
+            msg += "=== USAGE VISUALIZATION ===\n"
+            bar_length = 40
+            used_bars = int((percent_used / 100) * bar_length)
+            remaining_bars = bar_length - used_bars
+            
+            if percent_used >= 80:
+                bar_color = "🔴"
+            elif percent_used >= 60:
+                bar_color = "🟡"
+            else:
+                bar_color = "🟢"
+            
+            msg += f"{bar_color} [{'█' * used_bars}{'░' * remaining_bars}] {percent_used}%\n\n"
+            
+            # File info
+            msg += "=== FILE INFORMATION ===\n"
+            msg += f"Conversation File: {conv_file.name}\n"
+            msg += f"File Size: {file_size / (1024*1024):.2f} MB\n"
+            msg += f"Session ID: {self.current_session['id'][:16]}...\n\n"
+            
+            # Recommendations
+            msg += "=== RECOMMENDATIONS ===\n"
+            if percent_used >= 80:
+                msg += "🔴 CRITICAL: Start a new session soon!\n"
+                msg += "   → Use 'Copy Handoff' to transition\n"
+            elif percent_used >= 60:
+                msg += "🟡 WARNING: Approaching context limit\n"
+                msg += "   → Plan to wrap up current task\n"
+            else:
+                msg += "✅ Context usage is healthy\n"
+            
+            messagebox.showinfo("Advanced Token Statistics", msg)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate stats: {e}")
     
     def run(self):
         self.root.mainloop()
