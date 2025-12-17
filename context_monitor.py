@@ -82,8 +82,8 @@ class ContextMonitor:
         y_pos = pos[2] if len(pos) > 2 else "50"
         
         if self.mini_mode:
-            # Mini mode: circular gauge
-            self.root.geometry(f"150x150+{x_pos}+{y_pos}")
+            # Mini mode: circular gauge - reduced size, tighter fit
+            self.root.geometry(f"120x120+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Use transparent color to create circular appearance
@@ -91,12 +91,12 @@ class ContextMonitor:
             self.root.configure(bg=trans_color)
             self.root.attributes('-transparentcolor', trans_color)
             
-            self.gauge_canvas = tk.Canvas(self.root, width=150, height=150,
+            self.gauge_canvas = tk.Canvas(self.root, width=120, height=120,
                                           bg=trans_color, highlightthickness=0)
             self.gauge_canvas.pack()
             
-            # Draw circular background
-            self.gauge_canvas.create_oval(10, 10, 140, 140, fill=self.colors['bg'], outline='')
+            # Draw circular background - reduced padding (was 10, now 4)
+            self.gauge_canvas.create_oval(4, 4, 116, 116, fill=self.colors['bg'], outline='')
             
             self.draw_gauge(self.current_percent)
             
@@ -241,10 +241,10 @@ class ContextMonitor:
         width = self.gauge_canvas.winfo_reqwidth()
         
         if self.mini_mode:
-            # Center within the visible circle (which is at 10,10 to 140,140)
-            cx, cy = 75, 75
-            r = 48
-            arc_width = 10
+            # Center within the visible circle (120x120 with 4px padding = 4,4 to 116,116)
+            cx, cy = 60, 60
+            r = 44  # Larger radius to fill more space
+            arc_width = 8
         else:
             cx, cy = width // 2, width // 2
             r = (width // 2) - 12
