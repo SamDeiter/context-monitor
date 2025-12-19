@@ -72,6 +72,10 @@ class ContextMonitor:
         self.project_name_cache = {}
         self.project_name_timestamp = {}
         
+        # Polling settings (in milliseconds)
+        self.polling_interval = self.settings.get('polling_interval', 10000)  # Default 10s
+        self.last_tokens = 0  # For delta tracking
+        
         # Paths
         self.conversations_dir = Path.home() / '.gemini' / 'antigravity' / 'conversations'
         self.history_file = Path.home() / '.gemini' / 'antigravity' / 'scratch' / 'token-widget' / 'history.json'
@@ -144,6 +148,19 @@ class ContextMonitor:
                             bg=self.colors['bg3'], fg=self.colors['text'])
             title.pack(side='left', padx=10, pady=5)
             
+            # Close button (packed first to be at far right)
+            close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
+                                bg=self.colors['bg3'], fg=self.colors['text2'], cursor='hand2')
+            close_btn.pack(side='right', padx=8)
+            close_action = self.minimize_to_tray if HAS_TRAY else self.cleanup_and_exit
+            close_btn.bind('<Button-1>', lambda e: close_action())
+            
+            # Mini mode toggle
+            mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
+                               bg=self.colors['bg3'], fg=self.colors['blue'])
+            mini_btn.pack(side='right', padx=5)
+            mini_btn.bind('<Button-1>', lambda e: self.toggle_mini_mode())
+            
             # Transparency controls
             alpha_frame = tk.Frame(header, bg=self.colors['bg3'])
             alpha_frame.pack(side='right', padx=5)
@@ -155,19 +172,6 @@ class ContextMonitor:
             tk.Label(alpha_frame, text="+", font=('Segoe UI', 10), cursor='hand2',
                     bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
             alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(0.05))
-            
-            # Mini mode toggle
-            mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
-                               bg=self.colors['bg3'], fg=self.colors['blue'])
-            mini_btn.pack(side='right', padx=5)
-            mini_btn.bind('<Button-1>', lambda e: self.toggle_mini_mode())
-            
-            close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
-                                bg=self.colors['bg3'], fg=self.colors['text2'], cursor='hand2')
-            close_btn.pack(side='right', padx=5)
-            # Bind close to minimize if tray is available, else exit
-            close_action = self.minimize_to_tray if HAS_TRAY else self.cleanup_and_exit
-            close_btn.bind('<Button-1>', lambda e: close_action())
             
             for w in [header, title]:
                 w.bind('<Button-1>', self.start_drag)
@@ -202,6 +206,12 @@ class ContextMonitor:
                                          bg=self.colors['bg2'], fg=self.colors['text'])
             self.tokens_label.pack(anchor='w')
             self.tokens_label.bind('<Button-3>', self.show_context_menu)
+            
+            # Delta label (tokens used since last refresh)
+            self.delta_label = tk.Label(info, text="", font=('Segoe UI', 8),
+                                        bg=self.colors['bg2'], fg=self.colors['muted'])
+            self.delta_label.pack(anchor='w')
+            self.delta_label.bind('<Button-3>', self.show_context_menu)
             
             tk.Label(info, text="PROJECT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(8,0))
@@ -468,6 +478,9 @@ $sb.ToString()
         tokens_left = max(0, context_window - tokens_used)
         percent = min(100, round((tokens_used / context_window) * 100))
         
+        # Calculate delta from last reading
+        delta = tokens_used - self.last_tokens if self.last_tokens > 0 else 0
+        
         self.current_percent = percent
         self.draw_gauge(percent)
         
@@ -476,6 +489,16 @@ $sb.ToString()
         
         if not self.mini_mode:
             self.tokens_label.config(text=f"{tokens_left:,}")
+            
+            # Update delta label
+            if hasattr(self, 'delta_label'):
+                if delta > 0:
+                    self.delta_label.config(text=f"↑ +{delta:,} since last", fg=self.colors['yellow'])
+                elif delta < 0:
+                    self.delta_label.config(text=f"↓ {delta:,} (new session)", fg=self.colors['blue'])
+                else:
+                    self.delta_label.config(text="— no change", fg=self.colors['muted'])
+            
             project_name = self.get_project_name(self.current_session['id'])
             self.session_label.config(text=project_name)
             
@@ -527,7 +550,7 @@ Read those logs to understand what we were working on, then continue helping me.
             
     def auto_refresh(self):
         self.load_session()
-        self.root.after(15000, self.auto_refresh)
+        self.root.after(self.polling_interval, self.auto_refresh)
     
     def force_refresh(self):
         """Force refresh project detection by clearing cache"""
@@ -553,6 +576,12 @@ Read those logs to understand what we were working on, then continue helping me.
         """Manually switch to a specific session"""
         self.selected_session_id = session_id
         self.load_session()
+    
+    def set_polling_speed(self, interval_ms):
+        """Set the polling interval in milliseconds"""
+        self.polling_interval = interval_ms
+        self.save_settings()
+        print(f"[Settings] Polling interval set to {interval_ms}ms")
         
     def start_drag(self, event):
         self.drag_x = event.x
@@ -580,7 +609,8 @@ Read those logs to understand what we were working on, then continue helping me.
             with open(self.settings_file, 'w') as f:
                 json.dump({
                     'alpha': self.root.attributes('-alpha'),
-                    'mini_mode': self.mini_mode
+                    'mini_mode': self.mini_mode,
+                    'polling_interval': self.polling_interval
                 }, f, indent=2)
         except Exception as e:
             print(f"Error saving settings: {e}")
@@ -622,11 +652,17 @@ Read those logs to understand what we were working on, then continue helping me.
         import time
         now = time.time()
         
-        # Throttle: Check last save
+        # Calculate delta from last reading
+        delta = tokens - self.last_tokens if self.last_tokens > 0 else 0
+        self.last_tokens = tokens
+        
+        # Throttle based on polling interval (convert ms to seconds, minimum 5s)
+        throttle_seconds = max(5, self.polling_interval / 1000)
+        
         if not hasattr(self, 'last_history_save'):
             self.last_history_save = 0
             
-        if now - self.last_history_save < 300: # 5 mins
+        if now - self.last_history_save < throttle_seconds:
             return
             
         try:
@@ -634,15 +670,16 @@ Read those logs to understand what we were working on, then continue helping me.
             if session_id not in data:
                 data[session_id] = []
             
-            # Add point
+            # Add point with delta
             data[session_id].append({
                 'ts': now,
-                'tokens': tokens
+                'tokens': tokens,
+                'delta': delta
             })
             
-            # Keep last 100 points per session
-            if len(data[session_id]) > 100:
-                data[session_id] = data[session_id][-100:]
+            # Keep last 200 points per session (more history)
+            if len(data[session_id]) > 200:
+                data[session_id] = data[session_id][-200:]
                 
             self.history_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.history_file, 'w') as f:
@@ -653,7 +690,7 @@ Read those logs to understand what we were working on, then continue helping me.
             print(f"History save error: {e}")
 
     def show_history(self):
-        """Show usage history graph"""
+        """Show usage history graph with time labels"""
         if not self.current_session:
             return
             
@@ -667,40 +704,116 @@ Read those logs to understand what we were working on, then continue helping me.
         # Create window
         win = tk.Toplevel(self.root)
         win.title("Token Usage History")
-        win.geometry("400x300")
+        win.geometry("500x350")
         win.configure(bg=self.colors['bg'])
+        win.attributes('-topmost', True)
         
-        canvas = tk.Canvas(win, width=380, height=250, bg=self.colors['bg2'], highlightthickness=0)
-        canvas.pack(padx=10, pady=10)
+        # Title
+        tk.Label(win, text=f"📊 {self.get_project_name(sid)}", 
+                font=('Segoe UI', 12, 'bold'),
+                bg=self.colors['bg'], fg=self.colors['text']).pack(pady=(10,5))
         
-        # Draw axes
-        w = 380
-        h = 250
-        padding = 20
+        canvas = tk.Canvas(win, width=460, height=280, bg=self.colors['bg2'], highlightthickness=0)
+        canvas.pack(padx=20, pady=10)
         
-        # Normalize data
-        max_tokens = 200000
-        min_ts = data[0]['ts']
-        max_ts = data[-1]['ts']
-        time_range = max_ts - min_ts
-        if time_range == 0: time_range = 1
-        
-        points = []
-        for p in data:
-            x = padding + (p['ts'] - min_ts) / time_range * (w - 2*padding)
-            y = h - (padding + (p['tokens'] / max_tokens) * (h - 2*padding))
-            points.append((x, y))
+        def draw_graph():
+            canvas.delete('all')
+            current_data = self.load_history().get(sid, [])
+            if not current_data:
+                return
             
-        # Draw line
-        if len(points) > 1:
-            canvas.create_line(points, fill=self.colors['blue'], width=2, smooth=True)
+            w = 460
+            h = 280
+            left_pad = 50
+            right_pad = 20
+            top_pad = 20
+            bottom_pad = 40
             
-        # Draw limit line (80%)
-        limit_y = h - (padding + 0.8 * (h - 2*padding))
-        canvas.create_line(padding, limit_y, w-padding, limit_y, fill=self.colors['red'], dash=(4, 4))
-        canvas.create_text(w-padding, limit_y-10, text="80% Limit", fill=self.colors['red'], font=('Segoe UI', 8), anchor='e')
-
-        tk.Label(win, text=f"History for {self.get_project_name(sid)}", bg=self.colors['bg'], fg=self.colors['text']).pack()
+            # Draw Y-axis (percentage)
+            max_tokens = 200000
+            for pct in [0, 25, 50, 75, 100]:
+                y = h - bottom_pad - (pct / 100) * (h - top_pad - bottom_pad)
+                canvas.create_line(left_pad, y, w - right_pad, y, 
+                                  fill=self.colors['bg3'], dash=(2, 4))
+                canvas.create_text(left_pad - 5, y, text=f"{pct}%", 
+                                  fill=self.colors['muted'], font=('Segoe UI', 8), anchor='e')
+            
+            min_ts = current_data[0]['ts']
+            max_ts = current_data[-1]['ts']
+            time_range = max_ts - min_ts
+            if time_range == 0: 
+                time_range = 1
+            
+            # Draw X-axis time labels
+            from datetime import datetime
+            num_labels = min(5, len(current_data))
+            for i in range(num_labels):
+                idx = int(i * (len(current_data) - 1) / max(1, num_labels - 1))
+                ts = current_data[idx]['ts']
+                x = left_pad + (ts - min_ts) / time_range * (w - left_pad - right_pad)
+                if time_range < 3600:
+                    label = datetime.fromtimestamp(ts).strftime("%H:%M")
+                elif time_range < 86400:
+                    label = datetime.fromtimestamp(ts).strftime("%H:%M")
+                else:
+                    label = datetime.fromtimestamp(ts).strftime("%m/%d %H:%M")
+                canvas.create_text(x, h - bottom_pad + 15, text=label,
+                                  fill=self.colors['muted'], font=('Segoe UI', 7), anchor='n')
+            
+            # Plot data points
+            points = []
+            for p in current_data:
+                x = left_pad + (p['ts'] - min_ts) / time_range * (w - left_pad - right_pad)
+                pct = min(100, (p['tokens'] / max_tokens) * 100)
+                y = h - bottom_pad - (pct / 100) * (h - top_pad - bottom_pad)
+                points.append((x, y))
+            
+            # Draw filled area
+            if len(points) > 1:
+                fill_points = [(left_pad, h - bottom_pad)] + points + [(w - right_pad, h - bottom_pad)]
+                canvas.create_polygon(fill_points, fill='#1a3a5c', outline='')
+            
+            # Draw line
+            if len(points) > 1:
+                canvas.create_line(points, fill=self.colors['blue'], width=2, smooth=True)
+            
+            # Draw 80% warning line
+            warn_y = h - bottom_pad - 0.8 * (h - top_pad - bottom_pad)
+            canvas.create_line(left_pad, warn_y, w - right_pad, warn_y, 
+                              fill=self.colors['red'], width=2, dash=(4, 4))
+            canvas.create_text(w - right_pad - 5, warn_y - 8, text="80%", 
+                              fill=self.colors['red'], font=('Segoe UI', 8), anchor='e')
+            
+            # Current value
+            if points:
+                last_x, last_y = points[-1]
+                current_pct = min(100, (current_data[-1]['tokens'] / max_tokens) * 100)
+                color = self.colors['green']
+                if current_pct >= 80:
+                    color = self.colors['red']
+                elif current_pct >= 60:
+                    color = self.colors['yellow']
+                canvas.create_oval(last_x-5, last_y-5, last_x+5, last_y+5, 
+                                  fill=color, outline='white', width=2)
+        
+        draw_graph()
+        
+        # Auto-refresh
+        refresh_id = None
+        def auto_refresh():
+            nonlocal refresh_id
+            if win.winfo_exists():
+                draw_graph()
+                refresh_id = win.after(5000, auto_refresh)
+        
+        def on_close():
+            nonlocal refresh_id
+            if refresh_id:
+                win.after_cancel(refresh_id)
+            win.destroy()
+        
+        win.protocol("WM_DELETE_WINDOW", on_close)
+        refresh_id = win.after(5000, auto_refresh)
         
     def flash_warning(self):
         """Flash the widget in mini mode when approaching limit"""
@@ -817,6 +930,32 @@ Read those logs to understand what we were working on, then continue helping me.
             menu.add_command(label="  ◳  Expand to Full Mode", command=self.toggle_mini_mode)
         else:
             menu.add_command(label="  ◱  Collapse to Mini Mode", command=self.toggle_mini_mode)
+        
+        menu.add_separator()
+        
+        # Polling speed submenu
+        speed_menu = tk.Menu(menu, tearoff=0,
+                            bg=self.colors['bg2'],
+                            fg=self.colors['text'],
+                            activebackground=self.colors['blue'],
+                            activeforeground='white')
+        
+        speeds = [
+            ("  ⚡  3 seconds (fast)", 3000),
+            ("  🔄  5 seconds", 5000),
+            ("  ⏱️  10 seconds (default)", 10000),
+            ("  🐢  30 seconds (slow)", 30000),
+        ]
+        
+        for label, interval in speeds:
+            check = "✓ " if self.polling_interval == interval else "  "
+            from functools import partial
+            speed_menu.add_command(
+                label=f"{check}{label}",
+                command=partial(self.set_polling_speed, interval)
+            )
+        
+        menu.add_cascade(label="  ⏱️  Refresh Speed", menu=speed_menu)
         
         menu.add_separator()
         menu.add_command(label="  ✕  Exit", command=self.cleanup_and_exit)

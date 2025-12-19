@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "C:\Users\Sam Deiter\Documents\GitHub\context-monitor\context_monitor.py", line 1338, in <module>
+    app = ContextMonitor()
+          ^^^^^^^^^^^^^^^^
+  File "C:\Users\Sam Deiter\Documents\GitHub\context-monitor\context_monitor.py", line 92, in __init__
+    self.load_session()
+  File "C:\Users\Sam Deiter\Documents\GitHub\context-monitor\context_monitor.py", line 561, in load_session
+    self.session_label.config(text=project_name)
+    ^^^^^^^^^^^^^^^^^^
+AttributeError: 'ContextMonitor' object has no attribute 'session_label'
