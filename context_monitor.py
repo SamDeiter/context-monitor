@@ -122,6 +122,9 @@ class ContextMonitor:
         self.root.after(self.polling_interval, self.auto_refresh)
         self.root.after(500, self.flash_warning)
         
+        # Restore window position after UI is ready
+        self.root.after(100, self.restore_window_position)
+        
     def setup_ui(self):
         # Clear existing widgets
         for widget in self.root.winfo_children():
@@ -707,10 +710,26 @@ Read those logs to understand what we were working on, then continue helping me.
                 json.dump({
                     'alpha': self.root.attributes('-alpha'),
                     'mini_mode': self.mini_mode,
-                    'polling_interval': self.polling_interval
+                    'polling_interval': self.polling_interval,
+                    'daily_budget': self._daily_budget,
+                    'context_window': self._context_window,
+                    'window_x': self.root.winfo_x(),
+                    'window_y': self.root.winfo_y()
                 }, f, indent=2)
         except Exception as e:
             print(f"Error saving settings: {e}")
+    
+    def restore_window_position(self):
+        """Restore window to last saved position"""
+        x = self.settings.get('window_x')
+        y = self.settings.get('window_y')
+        if x is not None and y is not None:
+            # Ensure window is on screen
+            screen_w = self.root.winfo_screenwidth()
+            screen_h = self.root.winfo_screenheight()
+            x = max(0, min(x, screen_w - 100))
+            y = max(0, min(y, screen_h - 100))
+            self.root.geometry(f"+{x}+{y}")
     
     def toggle_mini_mode(self):
         """Toggle between full and mini mode"""
@@ -1948,30 +1967,60 @@ Read those logs to understand what we were working on, then continue helping me.
         ctx_status = tk.Label(ctx_frame, text="", font=('Segoe UI', 9),
                              bg=self.colors['bg2'], fg=self.colors['green'])
         ctx_status.pack(side='left', padx=5)
+        # Model selector dropdown
+        model_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
+        model_frame.pack(fill='x', pady=(10, 0))
         
-        # Presets dropdown
-        preset_frame = tk.Frame(ctx_frame, bg=self.colors['bg2'])
-        preset_frame.pack(side='right')
+        tk.Label(model_frame, text="🤖 AI Model:",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
         
-        presets = [
-            ("Gemini 3 Pro (1M)", 1000000),
-            ("Gemini 2.5 Pro (1M)", 1000000),
-            ("Gemini 2.0 Flash (1M)", 1000000),
-            ("Claude 3.5 (200K)", 200000),
-            ("GPT-4 Turbo (128K)", 128000),
-        ]
+        # Model presets with context windows
+        models = {
+            "Gemini 3 Pro": 1000000,
+            "Gemini 2.5 Pro": 1000000,
+            "Gemini 2.0 Flash": 1000000,
+            "Claude 3.5 Sonnet": 200000,
+            "Claude 3 Opus": 200000,
+            "GPT-4 Turbo": 128000,
+            "GPT-4o": 128000,
+            "Custom": None
+        }
         
-        def set_preset(ctx_val):
-            ctx_var.set(str(ctx_val))
-            save_context()
+        # Determine current model from context window
+        current_model = "Custom"
+        for name, ctx in models.items():
+            if ctx == self._context_window:
+                current_model = name
+                break
         
-        from functools import partial
-        for name, val in presets[:3]:  # Show first 3 presets
-            btn = tk.Label(preset_frame, text=f"[{name.split()[0]}]", 
-                          font=('Segoe UI', 8), cursor='hand2',
-                          bg=self.colors['bg2'], fg=self.colors['blue'])
-            btn.pack(side='left', padx=2)
-            btn.bind('<Button-1>', lambda e, v=val: set_preset(v))
+        model_var = tk.StringVar(value=current_model)
+        
+        # Create dropdown menu
+        model_menu = tk.OptionMenu(model_frame, model_var, *models.keys())
+        model_menu.config(bg=self.colors['bg3'], fg=self.colors['text'],
+                         activebackground=self.colors['blue'], activeforeground='white',
+                         highlightthickness=0, font=('Segoe UI', 9))
+        model_menu['menu'].config(bg=self.colors['bg3'], fg=self.colors['text'],
+                                  activebackground=self.colors['blue'], activeforeground='white')
+        model_menu.pack(side='left', padx=10)
+        
+        model_status = tk.Label(model_frame, text="", font=('Segoe UI', 9),
+                               bg=self.colors['bg2'], fg=self.colors['green'])
+        model_status.pack(side='left')
+        
+        def on_model_change(*args):
+            selected = model_var.get()
+            ctx = models.get(selected)
+            if ctx is not None:
+                self._context_window = ctx
+                ctx_var.set(str(ctx))
+                self.settings['context_window'] = ctx
+                self.settings['model'] = selected
+                self.save_settings()
+                model_status.config(text=f"✓ {ctx:,} tokens")
+                win.after(2000, lambda: model_status.config(text=""))
+        
+        model_var.trace('w', on_model_change)
     
     def export_history_csv(self):
         """Export token history to CSV file"""
