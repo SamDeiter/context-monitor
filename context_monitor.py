@@ -500,14 +500,25 @@ $sb.ToString()
         if not project_name:
             try:
                 pb_file = self.conversations_dir / f"{session_id}.pb"
+                gz_file = self.conversations_dir / f"{session_id}.pb.gz"
+                
+                content = None
                 if pb_file.exists():
-                    # Read only the last 50KB for recent context (faster & more accurate)
                     with open(pb_file, 'rb') as f:
                         f.seek(0, 2)  # Seek to end
                         size = f.tell()
                         start = max(0, size - 50000)  # Last 50KB
                         f.seek(start)
                         content = f.read()
+                elif gz_file.exists():
+                    # Read compressed file
+                    import gzip
+                    with gzip.open(gz_file, 'rb') as f:
+                        # Can't seek in gzip, read all and take last 50KB
+                        full_content = f.read()
+                        content = full_content[-50000:] if len(full_content) > 50000 else full_content
+                
+                if content:
                     text = content.decode('utf-8', errors='ignore')
                     
                     # Only look for Active Document path (most reliable for current context)
