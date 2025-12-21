@@ -106,6 +106,7 @@ class ContextMonitor:
         self._last_notification_time = 0
         self._notifier = ToastNotifier() if HAS_TOAST else None
         self._daily_budget = self.settings.get('daily_budget', 500000)  # Default 500k tokens/day
+        self._context_window = self.settings.get('context_window', 1000000)  # Default 1M tokens (Gemini 3 Pro)
         
         # Hardware Scan
         self.total_ram_mb = self.get_total_memory()
@@ -539,7 +540,7 @@ $sb.ToString()
                 # Session disappeared, reset selection
                 self.selected_session_id = None
 
-        context_window = 200000
+        context_window = self._context_window
         tokens_used = self.current_session['estimated_tokens'] // 10
         tokens_left = max(0, context_window - tokens_used)
         percent = min(100, round((tokens_used / context_window) * 100))
@@ -622,7 +623,7 @@ $sb.ToString()
         if not self.current_session:
             return
             
-        context_window = 200000
+        context_window = self._context_window
         tokens_used = self.current_session['estimated_tokens'] // 10
         tokens_left = max(0, context_window - tokens_used)
         percent = min(100, round((tokens_used / context_window) * 100))
@@ -853,7 +854,7 @@ Read those logs to understand what we were working on, then continue helping me.
             bottom_pad = 40
             
             # Draw Y-axis (percentage)
-            max_tokens = 200000
+            max_tokens = self._context_window
             for pct in [0, 25, 50, 75, 100]:
                 y = h - bottom_pad - (pct / 100) * (h - top_pad - bottom_pad)
                 canvas.create_line(left_pad, y, w - right_pad, y, 
@@ -1373,7 +1374,7 @@ Read those logs to understand what we were working on, then continue helping me.
             
             # Calculate token estimates
             file_size = conv_file.stat().st_size
-            context_window = 200000
+            context_window = self._context_window
             tokens_used = self.current_session['estimated_tokens'] // 10
             tokens_left = max(0, context_window - tokens_used)
             percent_used = min(100, round((tokens_used / context_window) * 100))
@@ -1710,7 +1711,7 @@ Read those logs to understand what we were working on, then continue helping me.
         rate_per_second = token_span / time_span
         
         # Calculate remaining tokens until 80% (handoff point)
-        context_window = 200000
+        context_window = self._context_window
         current_tokens = recent[-1]['tokens']
         handoff_threshold = context_window * 0.8
         remaining = handoff_threshold - current_tokens
@@ -1915,6 +1916,62 @@ Read those logs to understand what we were working on, then continue helping me.
         tk.Button(budget_frame, text="Save", command=save_budget,
                  bg=self.colors['blue'], fg='white', font=('Segoe UI', 9),
                  relief='flat', padx=10).pack(side='left')
+        
+        # ===== CONTEXT WINDOW SETTING =====
+        ctx_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
+        ctx_frame.pack(fill='x', pady=(10, 0))
+        
+        tk.Label(ctx_frame, text="🎯 Context Window:",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
+        
+        ctx_var = tk.StringVar(value=str(self._context_window))
+        ctx_entry = tk.Entry(ctx_frame, textvariable=ctx_var, width=12,
+                            bg=self.colors['bg3'], fg=self.colors['text'],
+                            insertbackground=self.colors['text'], font=('Consolas', 10))
+        ctx_entry.pack(side='left', padx=10)
+        
+        def save_context():
+            try:
+                new_ctx = int(ctx_var.get())
+                self._context_window = new_ctx
+                self.settings['context_window'] = new_ctx
+                self.save_settings()
+                ctx_status.config(text="✓")
+                win.after(1500, lambda: ctx_status.config(text=""))
+            except ValueError:
+                pass
+        
+        tk.Button(ctx_frame, text="Save", command=save_context,
+                 bg=self.colors['blue'], fg='white', font=('Segoe UI', 9),
+                 relief='flat', padx=5).pack(side='left')
+        
+        ctx_status = tk.Label(ctx_frame, text="", font=('Segoe UI', 9),
+                             bg=self.colors['bg2'], fg=self.colors['green'])
+        ctx_status.pack(side='left', padx=5)
+        
+        # Presets dropdown
+        preset_frame = tk.Frame(ctx_frame, bg=self.colors['bg2'])
+        preset_frame.pack(side='right')
+        
+        presets = [
+            ("Gemini 3 Pro (1M)", 1000000),
+            ("Gemini 2.5 Pro (1M)", 1000000),
+            ("Gemini 2.0 Flash (1M)", 1000000),
+            ("Claude 3.5 (200K)", 200000),
+            ("GPT-4 Turbo (128K)", 128000),
+        ]
+        
+        def set_preset(ctx_val):
+            ctx_var.set(str(ctx_val))
+            save_context()
+        
+        from functools import partial
+        for name, val in presets[:3]:  # Show first 3 presets
+            btn = tk.Label(preset_frame, text=f"[{name.split()[0]}]", 
+                          font=('Segoe UI', 8), cursor='hand2',
+                          bg=self.colors['bg2'], fg=self.colors['blue'])
+            btn.pack(side='left', padx=2)
+            btn.bind('<Button-1>', lambda e, v=val: set_preset(v))
     
     def export_history_csv(self):
         """Export token history to CSV file"""
