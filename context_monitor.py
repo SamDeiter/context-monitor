@@ -136,7 +136,7 @@ class ContextMonitor:
         else:
             # Full mode - reset transparency
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"320x260+{x_pos}+{y_pos}")
+            self.root.geometry(f"320x220+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -193,6 +193,7 @@ class ContextMonitor:
                                           bg=self.colors['bg2'], highlightthickness=0)
             self.gauge_canvas.pack(side='left', padx=(0, 12))
             self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
+            self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
             self.draw_gauge(self.current_percent)
             
             # Info
@@ -319,12 +320,39 @@ class ContextMonitor:
         if self.mini_mode:
             shadow_offset = 2
             shadow_color = '#000000'
-            self.gauge_canvas.create_text(cx+shadow_offset, cy+shadow_offset, text=f"{percent}%", 
+            # Draw percentage slightly higher to make room for delta
+            self.gauge_canvas.create_text(cx+shadow_offset, cy-8+shadow_offset, text=f"{percent}%", 
                                           font=('Segoe UI', pct_font_size, 'bold'), fill=shadow_color, tags='text')
-        
-        # Draw percentage - centered in both modes (removed label text to prevent cutoff)
-        self.gauge_canvas.create_text(cx, cy, text=f"{percent}%", 
-                                      font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
+            self.gauge_canvas.create_text(cx, cy-8, text=f"{percent}%", 
+                                          font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
+            
+            # Show latest delta below percentage
+            if hasattr(self, 'current_session') and self.current_session:
+                history_data = self.load_history().get(self.current_session['id'], [])
+                recent_deltas = [h for h in history_data if h.get('delta', 0) != 0]
+                if recent_deltas:
+                    last_delta = recent_deltas[-1].get('delta', 0)
+                    if last_delta > 0:
+                        delta_text = f"+{last_delta:,}"
+                        if last_delta > 5000:
+                            delta_color = self.colors['red']
+                        elif last_delta > 2000:
+                            delta_color = self.colors['yellow']
+                        else:
+                            delta_color = self.colors['green']
+                    else:
+                        delta_text = f"{last_delta:,}"
+                        delta_color = self.colors['blue']
+                    
+                    # Draw delta with shadow
+                    self.gauge_canvas.create_text(cx+1, cy+18+1, text=delta_text, 
+                                                  font=('Consolas', 10, 'bold'), fill=shadow_color, tags='text')
+                    self.gauge_canvas.create_text(cx, cy+18, text=delta_text, 
+                                                  font=('Consolas', 10, 'bold'), fill=delta_color, tags='text')
+        else:
+            # Full mode - just draw percentage centered
+            self.gauge_canvas.create_text(cx, cy, text=f"{percent}%", 
+                                          font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
         
     def get_sessions(self):
         sessions = []
@@ -1047,68 +1075,154 @@ Read those logs to understand what we were working on, then continue helping me.
         return large_files[:5]
     
     def show_diagnostics(self):
-        """Show diagnostics popup with detailed recommendations"""
+        """Show diagnostics popup with styled visual design"""
         procs = self.get_antigravity_processes()
         files = self.get_large_conversations()
-        
-        # Build message
-        msg = "=== ANTIGRAVITY PROCESSES ===\n"
-        msg += f"(System Logic: {self.total_ram_mb//1024}GB RAM detected)\n"
-        total_mem = 0
-        high_mem_types = []
         limits = self.thresholds
         
-        for p in procs:
-            mem = p.get('Mem', 0)
-            total_mem += mem
-            cpu = p.get('CPU', 0)
-            ptype = p.get('Type', 'Unknown')
-            status = "🔴" if mem > limits['proc_crit'] else "🟡" if mem > limits['proc_warn'] else "🟢"
-            msg += f"{status} {ptype}: {mem}MB RAM, {cpu}s CPU\n"
-            if mem > limits['proc_warn']:
-                high_mem_types.append(ptype)
+        # Calculate totals
+        total_mem = sum(p.get('Mem', 0) for p in procs)
+        total_file_size = sum(f['size_mb'] for f in files)
+        high_mem_types = [p.get('Type', 'Unknown') for p in procs if p.get('Mem', 0) > limits['proc_warn']]
         
-        msg += f"\nTotal: {total_mem}MB across {len(procs)} processes\n"
+        # Create styled window
+        win = tk.Toplevel(self.root)
+        win.title("📊 System Diagnostics")
+        win.geometry("450x650")
+        win.configure(bg=self.colors['bg'])
+        win.attributes('-topmost', True)
+        win.resizable(False, False)
         
-        msg += "\n=== LARGE CONVERSATION FILES ===\n"
-        total_size = sum(f['size_mb'] for f in files)
-        for f in files:
-            status = "🔴" if f['size_mb'] > 15 else "🟡" if f['size_mb'] > 8 else "🟢"
-            msg += f"{status} {f['name']}: {f['size_mb']}MB\n"
-        msg += f"\nTotal large files: {total_size:.1f}MB\n"
+        # Header
+        header = tk.Frame(win, bg=self.colors['bg3'], height=50)
+        header.pack(fill='x')
+        header.pack_propagate(False)
         
-        # Specific recommendations
-        msg += "\n=== WHAT TO DO ===\n"
+        tk.Label(header, text="🔧 System Diagnostics", 
+                font=('Segoe UI', 14, 'bold'),
+                bg=self.colors['bg3'], fg=self.colors['text']).pack(pady=12)
         
-        if 'Extension Host' in high_mem_types:
-            msg += "⚠️ Extension Host using high memory!\n"
-            msg += "   → Disable unused extensions\n"
-            msg += "   → Reload Window (Ctrl+Shift+P → Reload)\n\n"
+        # Main content with scrollbar
+        content = tk.Frame(win, bg=self.colors['bg'], padx=20, pady=15)
+        content.pack(fill='both', expand=True)
         
-        if 'Renderer/GPU' in high_mem_types:
-            msg += "⚠️ Renderer process high!\n"
-            msg += "   → Close unused tabs/editors\n"
-            msg += "   → Restart Antigravity\n\n"
+        def create_bar(parent, label, value, max_val, color):
+            """Create a visual progress bar"""
+            frame = tk.Frame(parent, bg=self.colors['bg'])
+            frame.pack(fill='x', pady=4)
+            
+            label_frame = tk.Frame(frame, bg=self.colors['bg'])
+            label_frame.pack(fill='x')
+            
+            tk.Label(label_frame, text=label, font=('Segoe UI', 9),
+                    bg=self.colors['bg'], fg=self.colors['text']).pack(side='left')
+            tk.Label(label_frame, text=f"{value}MB", font=('Segoe UI', 9, 'bold'),
+                    bg=self.colors['bg'], fg=color).pack(side='right')
+            
+            bar_canvas = tk.Canvas(frame, width=400, height=12, 
+                                   bg=self.colors['bg3'], highlightthickness=0)
+            bar_canvas.pack(fill='x', pady=(2, 0))
+            
+            pct = min(100, (value / max_val) * 100) if max_val > 0 else 0
+            bar_width = int((pct / 100) * 396)
+            if bar_width > 0:
+                bar_canvas.create_rectangle(2, 2, bar_width + 2, 10, fill=color, outline='')
         
-        if 'Language Server' in high_mem_types:
-            msg += "⚠️ Language Server consuming RAM!\n"
-            msg += "   → Close large projects\n"
-            msg += "   → Restart language server\n\n"
+        # Section: System Overview
+        tk.Label(content, text="SYSTEM OVERVIEW", font=('Segoe UI', 9),
+                bg=self.colors['bg'], fg=self.colors['muted']).pack(anchor='w', pady=(0, 8))
         
-        if total_size > 50:
-            msg += "⚠️ Large conversation files!\n"
-            msg += "   → Use 'Clean Old Conversations'\n\n"
+        info_frame = tk.Frame(content, bg=self.colors['bg2'], padx=12, pady=10)
+        info_frame.pack(fill='x')
         
+        tk.Label(info_frame, text=f"💾 RAM Detected: {self.total_ram_mb // 1024} GB", 
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w')
+        tk.Label(info_frame, text=f"⚙️ Processes: {len(procs)}", 
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w')
+        
+        # Total memory status
         if total_mem > limits['total_crit']:
-            msg += f"🔴 CRITICAL: Total memory > {limits['total_crit']//1024}GB!\n"
-            msg += "   → RESTART ANTIGRAVITY NOW\n"
+            status_color = self.colors['red']
+            status_text = "🔴 CRITICAL"
         elif total_mem > limits['total_warn']:
-            msg += f"🟡 High memory usage (>{limits['total_warn']//1024}GB)\n"
-            msg += "   → Consider restarting soon\n"
-        elif not high_mem_types and total_size <= 50:
-            msg += "✅ System looks healthy!\n"
+            status_color = self.colors['yellow']
+            status_text = "🟡 HIGH"
+        else:
+            status_color = self.colors['green']
+            status_text = "🟢 HEALTHY"
         
-        messagebox.showinfo("Context Monitor - Diagnostics", msg)
+        tk.Label(info_frame, text=f"📊 Total Memory: {total_mem}MB  {status_text}", 
+                font=('Segoe UI', 10, 'bold'), bg=self.colors['bg2'], fg=status_color).pack(anchor='w', pady=(5,0))
+        
+        # Separator
+        tk.Frame(content, bg=self.colors['bg3'], height=1).pack(fill='x', pady=12)
+        
+        # Section: Process Memory
+        tk.Label(content, text="PROCESS MEMORY", font=('Segoe UI', 9),
+                bg=self.colors['bg'], fg=self.colors['muted']).pack(anchor='w', pady=(0, 8))
+        
+        max_mem = max((p.get('Mem', 0) for p in procs), default=500)
+        for p in procs[:6]:  # Show top 6
+            mem = p.get('Mem', 0)
+            ptype = p.get('Type', 'Unknown')
+            if mem > limits['proc_crit']:
+                color = self.colors['red']
+            elif mem > limits['proc_warn']:
+                color = self.colors['yellow']
+            else:
+                color = self.colors['green']
+            create_bar(content, ptype, mem, max_mem * 1.2, color)
+        
+        # Separator
+        tk.Frame(content, bg=self.colors['bg3'], height=1).pack(fill='x', pady=12)
+        
+        # Section: Large Files
+        tk.Label(content, text=f"LARGE CONVERSATION FILES ({len(files)} files, {total_file_size:.1f}MB total)", 
+                font=('Segoe UI', 9), bg=self.colors['bg'], fg=self.colors['muted']).pack(anchor='w', pady=(0, 8))
+        
+        if files:
+            for f in files[:4]:  # Show top 4
+                size = f['size_mb']
+                if size > 15:
+                    color = self.colors['red']
+                elif size > 8:
+                    color = self.colors['yellow']
+                else:
+                    color = self.colors['green']
+                create_bar(content, f['name'][:20] + "...", size, 20, color)
+        else:
+            tk.Label(content, text="✅ No large files found", font=('Segoe UI', 10),
+                    bg=self.colors['bg'], fg=self.colors['green']).pack(anchor='w')
+        
+        # Separator
+        tk.Frame(content, bg=self.colors['bg3'], height=1).pack(fill='x', pady=12)
+        
+        # Section: Recommendations
+        tk.Label(content, text="RECOMMENDATIONS", font=('Segoe UI', 9),
+                bg=self.colors['bg'], fg=self.colors['muted']).pack(anchor='w', pady=(0, 8))
+        
+        rec_frame = tk.Frame(content, bg=self.colors['bg2'], padx=12, pady=10)
+        rec_frame.pack(fill='x')
+        
+        recommendations = []
+        if 'Extension Host' in high_mem_types:
+            recommendations.append("⚠️ Disable unused extensions")
+        if 'Renderer/GPU' in high_mem_types:
+            recommendations.append("⚠️ Close unused tabs/editors")
+        if total_file_size > 50:
+            recommendations.append("⚠️ Run 'Clean Old Conversations'")
+        if total_mem > limits['total_crit']:
+            recommendations.append("🔴 RESTART ANTIGRAVITY NOW")
+        elif total_mem > limits['total_warn']:
+            recommendations.append("🟡 Consider restarting soon")
+        
+        if not recommendations:
+            recommendations.append("✅ System looks healthy!")
+        
+        for rec in recommendations:
+            color = self.colors['red'] if '🔴' in rec else self.colors['yellow'] if '⚠️' in rec or '🟡' in rec else self.colors['green']
+            tk.Label(rec_frame, text=rec, font=('Segoe UI', 10),
+                    bg=self.colors['bg2'], fg=color).pack(anchor='w', pady=2)
     
     def cleanup_old_conversations(self):
         """Delete conversation files older than 7 days and larger than 5MB"""
@@ -1184,7 +1298,7 @@ Read those logs to understand what we were working on, then continue helping me.
             # Create window
             win = tk.Toplevel(self.root)
             win.title("📊 Advanced Token Statistics")
-            win.geometry("420x600")
+            win.geometry("420x700")
             win.configure(bg=self.colors['bg'])
             win.attributes('-topmost', True)
             win.resizable(False, False)
