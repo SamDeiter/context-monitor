@@ -1385,15 +1385,15 @@ Read those logs to understand what we were working on, then continue helping me.
                 total_size += stat.st_size
         
         if not to_compress:
-            messagebox.showinfo("Archive", "No old sessions to compress!\\n(Sessions must be >3 days old)")
+            messagebox.showinfo("Archive", "No old sessions to compress!\n(Sessions must be >3 days old)")
             return
         
-        msg = f"Found {len(to_compress)} old sessions ({total_size/1024/1024:.1f} MB total):\\n\\n"
+        msg = f"Found {len(to_compress)} old sessions ({total_size/1024/1024:.1f} MB total):\n\n"
         for f in to_compress[:5]:
-            msg += f"• {f['path'].stem[:16]}... ({f['size_mb']}MB, {f['age_days']}d old)\\n"
+            msg += f"• {f['path'].stem[:16]}... ({f['size_mb']}MB, {f['age_days']}d old)\n"
         if len(to_compress) > 5:
-            msg += f"... and {len(to_compress) - 5} more\\n"
-        msg += f"\\nCompress these to save ~70% disk space?"
+            msg += f"... and {len(to_compress) - 5} more\n"
+        msg += f"\nCompress these to save ~70% disk space?"
         
         if messagebox.askyesno("Archive Old Sessions", msg):
             compressed = 0
@@ -1423,7 +1423,7 @@ Read those logs to understand what we were working on, then continue helping me.
             
             saved_mb = saved_bytes / 1024 / 1024
             messagebox.showinfo("Archive Complete", 
-                              f"Compressed {compressed} sessions\\nSaved {saved_mb:.1f} MB of disk space!")
+                              f"Compressed {compressed} sessions\nSaved {saved_mb:.1f} MB of disk space!")
     
     def restart_antigravity(self):
         """Restart Antigravity IDE"""
