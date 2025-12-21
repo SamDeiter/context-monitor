@@ -478,7 +478,7 @@ $sb.ToString()
             pass
         return None
 
-    def get_project_name(self, session_id):
+    def get_project_name(self, session_id, skip_vscode=False):
         """Extract project name using multiple detection strategies"""
         # Check cache first (60 second cache to prevent PowerShell lag)
         import time
@@ -490,10 +490,11 @@ $sb.ToString()
         
         project_name = None
 
-        # Strategy 1: Check active VS Code window (MOST RELIABLE for current project)
-        vscode_project = self.get_active_vscode_project()
-        if vscode_project:
-            project_name = vscode_project
+        # Strategy 1: Check active VS Code window (ONLY for current session - PowerShell is slow)
+        if not skip_vscode:
+            vscode_project = self.get_active_vscode_project()
+            if vscode_project:
+                project_name = vscode_project
 
         # Strategy 2: Parse from conversation file - look for ACTIVE DOCUMENT path only
         if not project_name:
@@ -1069,10 +1070,12 @@ Read those logs to understand what we were working on, then continue helping me.
         from functools import partial
         from collections import OrderedDict
         
-        # Group sessions by project name
+        # Group sessions by project name (skip PowerShell for non-current sessions)
         projects = OrderedDict()
         for s in sessions:
-            name = self.get_project_name(s['id'])
+            # Only use full detection for current session, skip PowerShell for others
+            skip_ps = s['id'] != current_id
+            name = self.get_project_name(s['id'], skip_vscode=skip_ps)
             if name not in projects:
                 projects[name] = []
             projects[name].append(s)
