@@ -100,7 +100,7 @@ class ContextMonitor:
         self.setup_ui()
         self.root.bind('<Button-3>', self.show_context_menu)  # Right-click anywhere
         self.load_session()
-        self.root.after(15000, self.auto_refresh)
+        self.root.after(self.polling_interval, self.auto_refresh)
         self.root.after(500, self.flash_warning)
         
     def setup_ui(self):
@@ -716,9 +716,9 @@ Read those logs to understand what we were working on, then continue helping me.
         import time
         now = time.time()
         
-        # Return cache if valid (less than 30 seconds old)
+        # Return cache if valid (less than 5 seconds old for fast updates)
         if not force_reload and self._history_cache is not None:
-            if now - self._history_cache_time < 30:
+            if now - self._history_cache_time < 5:
                 return self._history_cache
         
         # Load from disk
@@ -1040,6 +1040,7 @@ Read those logs to understand what we were working on, then continue helping me.
                             activeforeground='white')
         
         speeds = [
+            ("  ⚡  1 second (turbo)", 1000),
             ("  ⚡  3 seconds (fast)", 3000),
             ("  🔄  5 seconds", 5000),
             ("  ⏱️  10 seconds (default)", 10000),
