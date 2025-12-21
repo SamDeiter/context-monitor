@@ -390,15 +390,22 @@ class ContextMonitor:
     def get_sessions(self):
         sessions = []
         try:
-            for f in self.conversations_dir.glob('*.pb'):
-                if '.tmp' not in f.name:
-                    stat = f.stat()
-                    sessions.append({
-                        'id': f.stem,
-                        'size': stat.st_size,
-                        'modified': stat.st_mtime,
-                        'estimated_tokens': stat.st_size // 4
-                    })
+            # Include both uncompressed and compressed sessions
+            for pattern in ['*.pb', '*.pb.gz']:
+                for f in self.conversations_dir.glob(pattern):
+                    if '.tmp' not in f.name:
+                        stat = f.stat()
+                        # Extract session ID (remove .pb or .pb.gz)
+                        session_id = f.stem
+                        if session_id.endswith('.pb'):
+                            session_id = session_id[:-3]
+                        sessions.append({
+                            'id': session_id,
+                            'size': stat.st_size,
+                            'modified': stat.st_mtime,
+                            'estimated_tokens': stat.st_size // 4,
+                            'compressed': pattern == '*.pb.gz'
+                        })
             sessions.sort(key=lambda x: x['modified'], reverse=True)
         except Exception as e:
             print(f"Error: {e}")
