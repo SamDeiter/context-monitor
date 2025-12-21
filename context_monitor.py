@@ -1044,6 +1044,7 @@ Read those logs to understand what we were working on, then continue helping me.
         
         # Actions section
         menu.add_command(label="  🧹  Clean Old Conversations", command=self.cleanup_old_conversations)
+        menu.add_command(label="  📦  Archive Old Sessions", command=self.archive_old_sessions)
         menu.add_command(label="  🔄  Restart Antigravity", command=self.restart_antigravity)
         menu.add_separator()
         
@@ -1354,6 +1355,75 @@ Read those logs to understand what we were working on, then continue helping me.
                 except Exception as e:
                     print(f"Error deleting {f['path']}: {e}")
             messagebox.showinfo("Cleanup Complete", f"Deleted {deleted} files.")
+    
+    def archive_old_sessions(self):
+        """Compress old session files using gzip to save disk space"""
+        import gzip
+        import shutil
+        from datetime import datetime, timedelta
+        
+        # Find sessions older than 3 days that aren't already compressed
+        cutoff = datetime.now().timestamp() - (3 * 24 * 60 * 60)  # 3 days ago
+        current_id = self.current_session['id'] if self.current_session else None
+        
+        to_compress = []
+        total_size = 0
+        
+        for f in self.conversations_dir.glob('*.pb'):
+            if '.tmp' in f.name:
+                continue
+            if current_id and current_id in f.stem:
+                continue  # Skip current session
+            
+            stat = f.stat()
+            if stat.st_mtime < cutoff and stat.st_size > 100000:  # Older than 3 days, > 100KB
+                to_compress.append({
+                    'path': f,
+                    'size_mb': round(stat.st_size / 1024 / 1024, 2),
+                    'age_days': int((datetime.now().timestamp() - stat.st_mtime) / 86400)
+                })
+                total_size += stat.st_size
+        
+        if not to_compress:
+            messagebox.showinfo("Archive", "No old sessions to compress!\\n(Sessions must be >3 days old)")
+            return
+        
+        msg = f"Found {len(to_compress)} old sessions ({total_size/1024/1024:.1f} MB total):\\n\\n"
+        for f in to_compress[:5]:
+            msg += f"• {f['path'].stem[:16]}... ({f['size_mb']}MB, {f['age_days']}d old)\\n"
+        if len(to_compress) > 5:
+            msg += f"... and {len(to_compress) - 5} more\\n"
+        msg += f"\\nCompress these to save ~70% disk space?"
+        
+        if messagebox.askyesno("Archive Old Sessions", msg):
+            compressed = 0
+            saved_bytes = 0
+            
+            for f in to_compress:
+                try:
+                    orig_path = f['path']
+                    gz_path = orig_path.with_suffix('.pb.gz')
+                    
+                    # Compress the file
+                    with open(orig_path, 'rb') as f_in:
+                        with gzip.open(gz_path, 'wb', compresslevel=6) as f_out:
+                            shutil.copyfileobj(f_in, f_out)
+                    
+                    # Calculate savings
+                    orig_size = orig_path.stat().st_size
+                    new_size = gz_path.stat().st_size
+                    saved_bytes += orig_size - new_size
+                    
+                    # Delete original
+                    orig_path.unlink()
+                    compressed += 1
+                    
+                except Exception as e:
+                    print(f"Error compressing {f['path']}: {e}")
+            
+            saved_mb = saved_bytes / 1024 / 1024
+            messagebox.showinfo("Archive Complete", 
+                              f"Compressed {compressed} sessions\\nSaved {saved_mb:.1f} MB of disk space!")
     
     def restart_antigravity(self):
         """Restart Antigravity IDE"""
