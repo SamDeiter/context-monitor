@@ -1110,7 +1110,6 @@ Read those logs to understand what we were working on, then continue helping me.
                             activeforeground='white')
         
         speeds = [
-            ("  ⚡  1 second (turbo)", 1000),
             ("  ⚡  3 seconds (fast)", 3000),
             ("  🔄  5 seconds", 5000),
             ("  ⏱️  10 seconds (default)", 10000),
@@ -1639,7 +1638,14 @@ Read those logs to understand what we were working on, then continue helping me.
         return self._analytics_cache
     
     def save_analytics(self, tokens, project_name):
-        """Track daily and project-level token usage"""
+        """Track daily and project-level token usage (with disk throttling)"""
+        import time
+        now = time.time()
+        
+        # Throttle disk writes to max once per 30 seconds
+        if not hasattr(self, '_last_analytics_save'):
+            self._last_analytics_save = 0
+        
         analytics = self.load_analytics()
         today = datetime.now().strftime('%Y-%m-%d')
         
@@ -1657,22 +1663,23 @@ Read those logs to understand what we were working on, then continue helping me.
                 analytics['projects'][project_name] = {'total': 0, 'sessions': set()}
             analytics['projects'][project_name]['total'] += delta
         
-        # Save to disk (throttled)
-        try:
-            self.analytics_file.parent.mkdir(parents=True, exist_ok=True)
-            # Convert sets to lists for JSON
-            save_data = {
-                'daily': analytics['daily'],
-                'projects': {k: {'total': v['total']} for k, v in analytics['projects'].items()}
-            }
-            with open(self.analytics_file, 'w') as f:
-                json.dump(save_data, f, indent=2)
-        except Exception as e:
-            print(f"Analytics save error: {e}")
-        
         self._analytics_cache = analytics
         
-        # Check budget and send notification
+        # Only save to disk if 30 seconds have passed
+        if now - self._last_analytics_save >= 30:
+            try:
+                self.analytics_file.parent.mkdir(parents=True, exist_ok=True)
+                save_data = {
+                    'daily': analytics['daily'],
+                    'projects': {k: {'total': v['total']} for k, v in analytics['projects'].items()}
+                }
+                with open(self.analytics_file, 'w') as f:
+                    json.dump(save_data, f, indent=2)
+                self._last_analytics_save = now
+            except Exception as e:
+                print(f"Analytics save error: {e}")
+        
+        # Check budget notification (already throttled internally)
         self.check_budget_notification(analytics, today)
     
     def check_budget_notification(self, analytics, today):
