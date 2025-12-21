@@ -16,7 +16,6 @@ import atexit
 import ctypes
 import platform
 import threading
-from queue import Queue, Empty
 import sys
 try:
     import pystray
@@ -98,7 +97,6 @@ class ContextMonitor:
         atexit.register(self._cleanup_processes)
         self.root.protocol("WM_DELETE_WINDOW", self.cleanup_and_exit)
         
-        self.setup_hotkey()
         self.setup_ui()
         self.root.bind('<Button-3>', self.show_context_menu)  # Right-click anywhere
         self.load_session()
@@ -147,7 +145,7 @@ class ContextMonitor:
         else:
             # Full mode - reset transparency
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"340x260+{x_pos}+{y_pos}")
+            self.root.geometry(f"320x220+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -200,7 +198,7 @@ class ContextMonitor:
             main.bind('<Button-3>', self.show_context_menu)
             
             # Gauge
-            self.gauge_canvas = tk.Canvas(main, width=110, height=110, 
+            self.gauge_canvas = tk.Canvas(main, width=90, height=90, 
                                           bg=self.colors['bg2'], highlightthickness=0)
             self.gauge_canvas.pack(side='left', padx=(0, 12))
             self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
@@ -227,10 +225,10 @@ class ContextMonitor:
             
             tk.Label(info, text="PROJECT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(8,0))
-            self.session_picker = ttk.Combobox(info, font=('Segoe UI', 8), state='readonly')
-            self.session_picker.pack(fill='x', pady=(2, 0))
-            self.session_picker.bind('<<ComboboxSelected>>', self.handle_session_change)
-            self.session_picker.bind('<Button-3>', self.show_context_menu)
+            self.session_label = tk.Label(info, text="—", font=('Segoe UI', 8),
+                                          bg=self.colors['bg2'], fg=self.colors['text2'])
+            self.session_label.pack(anchor='w')
+            self.session_label.bind('<Button-3>', self.show_context_menu)
             
             # Mini history panel (right side) - shows recent deltas
             history_frame = tk.Frame(main, bg=self.colors['bg3'], padx=6, pady=4)
@@ -240,20 +238,18 @@ class ContextMonitor:
             tk.Label(history_frame, text="RECENT", font=('Segoe UI', 7),
                     bg=self.colors['bg3'], fg=self.colors['muted']).pack(anchor='center')
             
-            self.sparkline_canvas = tk.Canvas(history_frame, width=80, height=45, 
-                                            bg=self.colors['bg3'], highlightthickness=0)
-            self.sparkline_canvas.pack(pady=4)
-            self.sparkline_canvas.bind('<Button-3>', self.show_context_menu)
+            self.history_labels = []
+            for i in range(5):  # Show last 5 deltas
+                lbl = tk.Label(history_frame, text="—", font=('Consolas', 8),
+                              bg=self.colors['bg3'], fg=self.colors['text2'])
+                lbl.pack(anchor='e')
+                lbl.bind('<Button-3>', self.show_context_menu)
+                self.history_labels.append(lbl)
             
             # Status bar with copy button
             self.status_frame = tk.Frame(content, bg=self.colors['bg3'], padx=8, pady=6)
             self.status_frame.pack(fill='x', pady=(10, 0))
             self.status_frame.bind('<Button-3>', self.show_context_menu)
-            
-            self.led_canvas = tk.Canvas(self.status_frame, width=15, height=15, 
-                                       bg=self.colors['bg3'], highlightthickness=0)
-            self.led_canvas.pack(side='left', padx=(0, 5))
-            self.update_led()
             
             self.status_label = tk.Label(self.status_frame, text="✓ Loading...", 
                                         font=('Segoe UI', 9),
@@ -288,41 +284,10 @@ class ContextMonitor:
         self.root.bind('<KeyPress-minus>', lambda e: self.adjust_alpha(-0.05))
         self.root.bind('<KeyPress-r>', lambda e: self.force_refresh())
         self.root.bind('<KeyPress-a>', lambda e: self.show_advanced_stats())
-        self.root.bind('<KeyPress-e>', lambda e: self.export_history_csv(self.current_session['id'] if self.current_session else None))
         
     def create_tooltip(self, widget, text):
         tooltip = ToolTip(widget, text, self.colors)
         
-
-    def animate_gauge(self, target_percent, duration_ms=300, frames=15):
-        """Animate gauge smoothly from current to target percent (Sprint 2: UI, Feature 3.1)"""
-        if not hasattr(self, '_animating'):
-            self._animating = False
-        
-        if self._animating:
-            return  # Don't stack animations
-        
-        start_percent = getattr(self, '_animated_percent', self.current_percent)
-        delta = target_percent - start_percent
-        frame_time = duration_ms // frames
-        
-        def animate_step(step):
-            if step >= frames:
-                self._animating = False
-                self._animated_percent = target_percent
-                self.draw_gauge(target_percent)
-                return
-            
-            # Ease-out function
-            progress = step / frames
-            eased = 1 - (1 - progress) ** 2  # Ease-out quadratic
-            current = start_percent + delta * eased
-            self.draw_gauge(int(current))
-            self.root.after(frame_time, lambda: animate_step(step + 1))
-        
-        self._animating = True
-        animate_step(0)
-
     def draw_gauge(self, percent):
         # Don't delete all in mini mode (preserve circle background)
         if not self.mini_mode:
@@ -536,297 +501,6 @@ $sb.ToString()
         # Fallback to truncated session ID
         return session_id[:16] + "..."
     
-
-    def get_estimated_time_remaining(self):
-        """Calculate estimated time remaining based on token burn rate (Sprint 2: Feature 2.3)"""
-        if not hasattr(self, 'current_session') or not self.current_session:
-            return None
-        
-        history_data = self.load_history().get(self.current_session['id'], [])
-        if len(history_data) < 3:  # Need at least 3 points for meaningful calculation
-            return None
-        
-        # Get recent entries (last 10 minutes or last 10 points, whichever is smaller)
-        import time
-        now = time.time()
-        recent = [h for h in history_data if now - h['ts'] < 600]  # Last 10 minutes
-        if len(recent) < 2:
-            recent = history_data[-10:]  # Fallback to last 10 points
-        
-        if len(recent) < 2:
-            return None
-        
-        # Calculate tokens per minute
-        time_span = recent[-1]['ts'] - recent[0]['ts']
-        if time_span <= 0:
-            return None
-        
-        tokens_used = recent[-1]['tokens'] - recent[0]['tokens']
-        if tokens_used <= 0:
-            return None  # No token usage growth = can't estimate
-        
-        burn_rate = tokens_used / (time_span / 60)  # tokens per minute
-        
-        # Calculate remaining tokens
-        context_window = 200000
-        tokens_left = context_window - recent[-1]['tokens']
-        
-        if burn_rate > 0 and tokens_left > 0:
-            minutes_left = tokens_left / burn_rate
-            return int(minutes_left), int(burn_rate)
-        
-        return None
-
-
-    def send_notification(self, title, message, urgency='info'):
-        """Send Windows toast notification (Sprint 2: Feature 2.2)"""
-        if not getattr(self, 'notifications_enabled', True):
-            return
-        
-        try:
-            from win10toast import ToastNotifier
-            toaster = ToastNotifier()
-            duration = 5 if urgency == 'info' else 10
-            toaster.show_toast(
-                title,
-                message,
-                duration=duration,
-                threaded=True
-            )
-        except ImportError:
-            # Fallback: simple print for debugging
-            print(f"[Notification] {title}: {message}")
-        except Exception as e:
-            print(f"Notification error: {e}")
-    
-    def check_and_notify(self, percent):
-        """Check thresholds and send notifications (Sprint 2: Feature 2.2)"""
-        if not hasattr(self, '_last_notification_threshold'):
-            self._last_notification_threshold = 0
-        
-        if percent >= 80 and self._last_notification_threshold < 80:
-            self.send_notification(
-                "⚠️ Context Critical!",
-                f"Token usage at {percent}%! Handoff copied to clipboard.",
-                urgency='critical'
-            )
-            self._last_notification_threshold = 80
-        elif percent >= 60 and self._last_notification_threshold < 60:
-            self.send_notification(
-                "⚡ Context Warning",
-                f"Token usage at {percent}%. Consider wrapping up soon.",
-                urgency='warning'
-            )
-            self._last_notification_threshold = 60
-        elif percent < 50:  # Reset when usage drops (new session)
-            self._last_notification_threshold = 0
-
-
-    def draw_sparkline(self):
-        """Draw a mini bar graph of recent deltas (Sprint 4: Feature 3.2)"""
-        if not hasattr(self, 'sparkline_canvas') or not self.current_session:
-            return
-            
-        self.sparkline_canvas.delete('all')
-        
-        history_data = self.load_history().get(self.current_session['id'], [])
-        # Get last 12 non-zero deltas (or just recent entries if zero is common)
-        recent_deltas = [h.get('delta', 0) for h in history_data][-12:]
-        
-        if not recent_deltas:
-            return
-            
-        w = 80
-        h = 40
-        max_delta = max(max(recent_deltas), 1000) # Scale at least to 1k
-        bar_width = (w // len(recent_deltas)) - 2
-        
-        for i, delta in enumerate(recent_deltas):
-            # Calculate height (min 2px)
-            bar_h = max(2, int((delta / max_delta) * (h - 4)))
-            x0 = i * (bar_width + 2)
-            y0 = h - bar_h
-            x1 = x0 + bar_width
-            y1 = h
-            
-            # Color based on magnitude
-            if delta > 5000:
-                color = self.colors['red']
-            elif delta > 2000:
-                color = self.colors['yellow']
-            elif delta > 0:
-                color = self.colors['green']
-            else:
-                color = self.colors['blue']
-                
-            self.sparkline_canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline='')
-
-    def update_led(self):
-        """Update the status LED indicator (Sprint 4: Feature 3.4)"""
-        if not hasattr(self, 'led_canvas'):
-            return
-            
-        self.led_canvas.delete('all')
-        
-        color = self.colors['green']
-        if self.current_percent >= 80:
-            color = self.colors['red']
-        elif self.current_percent >= 60:
-            color = self.colors['yellow']
-            
-        # Draw the LED circle
-        r = 5
-        self.led_canvas.create_oval(2, 2, 12, 12, fill=color, outline='')
-        
-        # Add a subtle glow/shine
-        self.led_canvas.create_oval(4, 4, 7, 7, fill='white', outline='', stipple='gray50')
-
-    def show_settings(self):
-        """Show settings configuration modal (Sprint 5: Feature 4.2)"""
-        from tkinter import ttk
-        win = tk.Toplevel(self.root)
-        win.title("Monitor Settings")
-        win.geometry("350x450")
-        win.configure(bg=self.colors['bg'])
-        win.attributes('-topmost', True)
-        win.resizable(False, False)
-        
-        # Header
-        tk.Label(win, text="⚙️ Widget Settings", font=('Segoe UI', 12, 'bold'),
-                bg=self.colors['bg'], fg=self.colors['text']).pack(pady=15)
-        
-        # Form Container
-        container = tk.Frame(win, bg=self.colors['bg'], padx=20)
-        container.pack(fill='both', expand=True)
-        
-        # 1. Polling Interval
-        tk.Label(container, text="Refresh Speed (ms)", bg=self.colors['bg'], fg=self.colors['text2']).pack(anchor='w')
-        speed_var = tk.IntVar(value=self.polling_interval)
-        speed_slider = tk.Scale(container, from_=1000, to=30000, orient='horizontal',
-                               variable=speed_var, bg=self.colors['bg'], fg=self.colors['text'],
-                               highlightthickness=0)
-        speed_slider.pack(fill='x', pady=(0, 15))
-        
-        # 2. Transparency
-        tk.Label(container, text="Transparency", bg=self.colors['bg'], fg=self.colors['text2']).pack(anchor='w')
-        alpha_var = tk.DoubleVar(value=self.root.attributes('-alpha'))
-        alpha_slider = tk.Scale(container, from_=0.3, to=1.0, resolution=0.05, orient='horizontal',
-                               variable=alpha_var, bg=self.colors['bg'], fg=self.colors['text'],
-                               highlightthickness=0)
-        alpha_slider.pack(fill='x', pady=(0, 15))
-        
-        # 3. Startup Toggle
-        startup_var = tk.BooleanVar(value=self.check_startup_status())
-        startup_check = tk.Checkbutton(container, text="Launch on Windows Startup", 
-                                      variable=startup_var, bg=self.colors['bg'], fg=self.colors['text'],
-                                      selectcolor=self.colors['bg2'], activebackground=self.colors['bg'])
-        startup_check.pack(anchor='w', pady=(0, 10))
-        
-        # 4. Notifications Toggle
-        notify_var = tk.BooleanVar(value=getattr(self, 'notifications_enabled', True))
-        notify_check = tk.Checkbutton(container, text="Enable Token Notifications", 
-                                     variable=notify_var, bg=self.colors['bg'], fg=self.colors['text'],
-                                     selectcolor=self.colors['bg2'], activebackground=self.colors['bg'])
-        notify_check.pack(anchor='w', pady=(0, 15))
-        
-        def save_and_close():
-            self.polling_interval = speed_var.get()
-            self.root.attributes('-alpha', alpha_var.get())
-            self.notifications_enabled = notify_var.get()
-            self.toggle_startup(startup_var.get())
-            self.save_settings()
-            win.destroy()
-            messagebox.showinfo("Settings", "Settings saved successfully!")
-            
-        # Save Button
-        save_btn = tk.Button(win, text="Save & Apply", command=save_and_close,
-                            bg=self.colors['blue'], fg='white', font=('Segoe UI', 10, 'bold'),
-                            padx=20, pady=5, bd=0, cursor='hand2')
-        save_btn.pack(pady=20)
-
-    def check_startup_status(self):
-        """Check if app is in Windows Run registry (Sprint 5: Feature 4.3)"""
-        try:
-            import winreg
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
-            try:
-                winreg.QueryValueEx(key, "AntigravityContextMonitor")
-                return True
-            except FileNotFoundError:
-                return False
-            finally:
-                winreg.CloseKey(key)
-        except:
-            return False
-
-    def toggle_startup(self, enable):
-        """Add/Remove from Windows startup (Sprint 5: Feature 4.3)"""
-        import sys
-        import winreg
-        
-        path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-        app_path = f'"{sys.executable}" "{Path(__file__).absolute()}"'
-        
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_SET_VALUE)
-            if enable:
-                winreg.SetValueEx(key, "AntigravityContextMonitor", 0, winreg.REG_SZ, app_path)
-            else:
-                try:
-                    winreg.DeleteValue(key, "AntigravityContextMonitor")
-                except FileNotFoundError:
-                    pass
-            winreg.CloseKey(key)
-        except Exception as e:
-            print(f"Startup toggle error: {e}")
-
-    def setup_hotkey(self):
-        """Register Win+Shift+T as a global hotkey (Sprint 6: Feature 2.6)"""
-        try:
-            # Register hotkey (Win + Shift + T)
-            # MOD_WIN = 0x0008, MOD_SHIFT = 0x0004
-            # T key code = 0x54
-            hotkey_id = 1
-            if ctypes.windll.user32.RegisterHotKey(None, hotkey_id, 0x0008 | 0x0004, 0x54):
-                print("✓ Global Hotkey registered: Win+Shift+T")
-                thread = threading.Thread(target=self.wait_for_hotkey, daemon=True)
-                thread.start()
-            else:
-                print("✗ Failed to register Hotkey")
-        except Exception as e:
-            print(f"Hotkey error: {e}")
-
-    def wait_for_hotkey(self):
-        """Wait for the hotkey event in a separate thread"""
-        import ctypes.wintypes
-        msg = ctypes.wintypes.MSG()
-        while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-            if msg.message == 0x0312: # WM_HOTKEY
-                self.root.after(0, self.toggle_visibility)
-            ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
-            ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
-
-    def toggle_visibility(self):
-        """Toggle widget visibility"""
-        if self.root.winfo_viewable():
-            self.root.withdraw()
-            if HAS_TRAY and hasattr(self, 'icon'):
-                self.icon.notify("Monitor Hidden. Press Win+Shift+T to show.", "Context Monitor")
-        else:
-            self.root.deiconify()
-            self.root.lift()
-            self.root.attributes('-topmost', True)
-
-    def handle_session_change(self, event):
-        """Handle session selection from dropdown (Sprint 6: Feature 2.1)"""
-        selection = self.session_picker.get()
-        # Find session ID from the selected display name
-        sessions = self.get_sessions()
-        for s in sessions:
-            name = self.get_project_name(s['id'])
-            if name == selection:
-                self.switch_session(s['id'])
-                break
     def load_session(self):
         sessions = self.get_sessions()
         if not sessions:
@@ -854,10 +528,7 @@ $sb.ToString()
         delta = tokens_used - self.last_tokens if self.last_tokens > 0 else 0
         
         self.current_percent = percent
-        self.check_and_notify(percent)
         self.draw_gauge(percent)
-        self.draw_sparkline()
-        self.update_led()
         
         # Save history (throttle: save max once per 5 mins)
         self.save_history(self.current_session['id'], tokens_used)
@@ -875,23 +546,37 @@ $sb.ToString()
                     self.delta_label.config(text="— no change", fg=self.colors['muted'])
             
             project_name = self.get_project_name(self.current_session['id'])
-            
-            # Update Session Picker values
-            sessions = self.get_sessions()
-            project_names = [self.get_project_name(s['id']) for s in sessions]
-            self.session_picker['values'] = project_names
-            
-            # Set current selection
-            current_name = self.get_project_name(self.current_session['id'])
-            if self.session_picker.get() != current_name:
-                self.session_picker.set(current_name)
-
+            self.session_label.config(text=project_name)
             
             # Update tray icon
             if HAS_TRAY:
                 self.update_tray_icon()
             
-
+            # Update mini history panel with recent deltas
+            if hasattr(self, 'history_labels'):
+                history_data = self.load_history().get(self.current_session['id'], [])
+                # Get last 5 entries with non-zero deltas
+                recent_deltas = [h for h in history_data if h.get('delta', 0) != 0][-5:]
+                
+                for i, lbl in enumerate(self.history_labels):
+                    if i < len(recent_deltas):
+                        d = recent_deltas[-(i+1)]  # Reverse order (newest first)
+                        delta_val = d.get('delta', 0)
+                        if delta_val > 0:
+                            text = f"+{delta_val:,}"
+                            # Color based on magnitude
+                            if delta_val > 5000:
+                                color = self.colors['red']
+                            elif delta_val > 2000:
+                                color = self.colors['yellow']
+                            else:
+                                color = self.colors['green']
+                        else:
+                            text = f"{delta_val:,}"
+                            color = self.colors['blue']
+                        lbl.config(text=text, fg=color)
+                    else:
+                        lbl.config(text="—", fg=self.colors['muted'])
             
             # Update status and auto-copy at 80%
             if percent >= 80:
@@ -974,37 +659,9 @@ Read those logs to understand what we were working on, then continue helping me.
         self.drag_x = event.x
         self.drag_y = event.y
         
-
-    def snap_to_edge(self, x, y):
-        """Snap window to screen edges when close (Sprint 4: Feature 3.5)"""
-        snap_distance = 20  # pixels to trigger snap
-        
-        # Get screen dimensions
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        window_width = self.root.winfo_width()
-        window_height = self.root.winfo_height()
-        
-        # Snap to left edge
-        if x < snap_distance:
-            x = 0
-        # Snap to right edge
-        elif x > screen_width - window_width - snap_distance:
-            x = screen_width - window_width
-        
-        # Snap to top edge
-        if y < snap_distance:
-            y = 0
-        # Snap to bottom edge
-        elif y > screen_height - window_height - snap_distance:
-            y = screen_height - window_height
-        
-        return x, y
-
     def drag(self, event):
         x = self.root.winfo_x() + event.x - self.drag_x
         y = self.root.winfo_y() + event.y - self.drag_y
-        x, y = self.snap_to_edge(x, y)
         self.root.geometry(f"+{x}+{y}")
         
     def load_settings(self):
@@ -1034,7 +691,6 @@ Read those logs to understand what we were working on, then continue helping me.
         """Toggle between full and mini mode"""
         self.mini_mode = not self.mini_mode
         self.save_settings()
-        self.setup_hotkey()
         self.setup_ui()
         self.load_session()
     
@@ -1050,8 +706,7 @@ Read those logs to understand what we were working on, then continue helping me.
         self.root.attributes('-alpha', 0.95)
         if self.mini_mode:
             self.mini_mode = False
-            self.setup_hotkey()
-        self.setup_ui()
+            self.setup_ui()
             self.load_session()
         self.save_settings()
     
@@ -1133,47 +788,6 @@ Read those logs to understand what we were working on, then continue helping me.
         except Exception as e:
             print(f"History flush error: {e}")
 
-
-    def export_history_csv(self, session_id=None):
-        """Export token history to CSV file (Sprint 3: Feature 2.4)"""
-        import csv
-        from datetime import datetime
-        from pathlib import Path
-        
-        downloads_folder = Path.home() / 'Downloads'
-        
-        data = self.load_history()
-        if session_id:
-            # Export single session
-            sessions_to_export = {session_id: data.get(session_id, [])}
-        else:
-            # Export all sessions
-            sessions_to_export = data
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = downloads_folder / f'context_monitor_export_{timestamp}.csv'
-        
-        try:
-            with open(filename, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['Session ID', 'Project', 'Timestamp', 'Tokens', 'Delta', 'Percent Used'])
-                
-                context_window = 200000
-                for sid, history in sessions_to_export.items():
-                    project_name = self.get_project_name(sid) if sid in self.project_name_cache else sid[:16]
-                    for entry in history:
-                        ts = datetime.fromtimestamp(entry['ts']).strftime('%Y-%m-%d %H:%M:%S')
-                        tokens = entry.get('tokens', 0)
-                        delta = entry.get('delta', 0)
-                        percent = round((tokens / context_window) * 100, 1)
-                        writer.writerow([sid, project_name, ts, tokens, delta, percent])
-            
-            messagebox.showinfo("Export Complete", f"History exported to:\n{filename}")
-            return str(filename)
-        except Exception as e:
-            messagebox.showerror("Export Failed", f"Error exporting: {e}")
-            return None
-
     def show_history(self):
         """Show usage history graph with time labels"""
         if not self.current_session:
@@ -1192,8 +806,6 @@ Read those logs to understand what we were working on, then continue helping me.
         win.geometry("500x350")
         win.configure(bg=self.colors['bg'])
         win.attributes('-topmost', True)
-        win.resizable(True, True)  # Make resizable
-        win.minsize(400, 280)  # Minimum size
         
         # Title
         tk.Label(win, text=f"📊 {self.get_project_name(sid)}", 
@@ -1382,7 +994,6 @@ Read those logs to understand what we were working on, then continue helping me.
         menu.add_command(label="  📊  Show Diagnostics", command=self.show_diagnostics)
         menu.add_command(label="  📈  Advanced Token Stats", command=self.show_advanced_stats)
         menu.add_command(label="  📅  Usage History Graph", command=self.show_history)
-        menu.add_command(label="🔔 Toggle Notifications", command=lambda: setattr(self, "notifications_enabled", not getattr(self, "notifications_enabled", True)))
         menu.add_separator()
         
         # Actions section
