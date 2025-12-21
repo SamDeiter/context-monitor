@@ -16,7 +16,6 @@ import atexit
 import ctypes
 import platform
 import threading
-from queue import Queue, Empty
 import sys
 try:
     import pystray
@@ -146,7 +145,7 @@ class ContextMonitor:
         else:
             # Full mode - reset transparency
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"340x240+{x_pos}+{y_pos}")
+            self.root.geometry(f"320x220+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -199,7 +198,7 @@ class ContextMonitor:
             main.bind('<Button-3>', self.show_context_menu)
             
             # Gauge
-            self.gauge_canvas = tk.Canvas(main, width=110, height=110, 
+            self.gauge_canvas = tk.Canvas(main, width=90, height=90, 
                                           bg=self.colors['bg2'], highlightthickness=0)
             self.gauge_canvas.pack(side='left', padx=(0, 12))
             self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
@@ -285,41 +284,10 @@ class ContextMonitor:
         self.root.bind('<KeyPress-minus>', lambda e: self.adjust_alpha(-0.05))
         self.root.bind('<KeyPress-r>', lambda e: self.force_refresh())
         self.root.bind('<KeyPress-a>', lambda e: self.show_advanced_stats())
-        self.root.bind('<KeyPress-e>', lambda e: self.export_history_csv(self.current_session['id'] if self.current_session else None))
         
     def create_tooltip(self, widget, text):
         tooltip = ToolTip(widget, text, self.colors)
         
-
-    def animate_gauge(self, target_percent, duration_ms=300, frames=15):
-        """Animate gauge smoothly from current to target percent (Sprint 2: UI, Feature 3.1)"""
-        if not hasattr(self, '_animating'):
-            self._animating = False
-        
-        if self._animating:
-            return  # Don't stack animations
-        
-        start_percent = getattr(self, '_animated_percent', self.current_percent)
-        delta = target_percent - start_percent
-        frame_time = duration_ms // frames
-        
-        def animate_step(step):
-            if step >= frames:
-                self._animating = False
-                self._animated_percent = target_percent
-                self.draw_gauge(target_percent)
-                return
-            
-            # Ease-out function
-            progress = step / frames
-            eased = 1 - (1 - progress) ** 2  # Ease-out quadratic
-            current = start_percent + delta * eased
-            self.draw_gauge(int(current))
-            self.root.after(frame_time, lambda: animate_step(step + 1))
-        
-        self._animating = True
-        animate_step(0)
-
     def draw_gauge(self, percent):
         # Don't delete all in mini mode (preserve circle background)
         if not self.mini_mode:
@@ -533,91 +501,6 @@ $sb.ToString()
         # Fallback to truncated session ID
         return session_id[:16] + "..."
     
-
-    def get_estimated_time_remaining(self):
-        """Calculate estimated time remaining based on token burn rate (Sprint 2: Feature 2.3)"""
-        if not hasattr(self, 'current_session') or not self.current_session:
-            return None
-        
-        history_data = self.load_history().get(self.current_session['id'], [])
-        if len(history_data) < 3:  # Need at least 3 points for meaningful calculation
-            return None
-        
-        # Get recent entries (last 10 minutes or last 10 points, whichever is smaller)
-        import time
-        now = time.time()
-        recent = [h for h in history_data if now - h['ts'] < 600]  # Last 10 minutes
-        if len(recent) < 2:
-            recent = history_data[-10:]  # Fallback to last 10 points
-        
-        if len(recent) < 2:
-            return None
-        
-        # Calculate tokens per minute
-        time_span = recent[-1]['ts'] - recent[0]['ts']
-        if time_span <= 0:
-            return None
-        
-        tokens_used = recent[-1]['tokens'] - recent[0]['tokens']
-        if tokens_used <= 0:
-            return None  # No token usage growth = can't estimate
-        
-        burn_rate = tokens_used / (time_span / 60)  # tokens per minute
-        
-        # Calculate remaining tokens
-        context_window = 200000
-        tokens_left = context_window - recent[-1]['tokens']
-        
-        if burn_rate > 0 and tokens_left > 0:
-            minutes_left = tokens_left / burn_rate
-            return int(minutes_left), int(burn_rate)
-        
-        return None
-
-
-    def send_notification(self, title, message, urgency='info'):
-        """Send Windows toast notification (Sprint 2: Feature 2.2)"""
-        if not getattr(self, 'notifications_enabled', True):
-            return
-        
-        try:
-            from win10toast import ToastNotifier
-            toaster = ToastNotifier()
-            duration = 5 if urgency == 'info' else 10
-            toaster.show_toast(
-                title,
-                message,
-                duration=duration,
-                threaded=True
-            )
-        except ImportError:
-            # Fallback: simple print for debugging
-            print(f"[Notification] {title}: {message}")
-        except Exception as e:
-            print(f"Notification error: {e}")
-    
-    def check_and_notify(self, percent):
-        """Check thresholds and send notifications (Sprint 2: Feature 2.2)"""
-        if not hasattr(self, '_last_notification_threshold'):
-            self._last_notification_threshold = 0
-        
-        if percent >= 80 and self._last_notification_threshold < 80:
-            self.send_notification(
-                "⚠️ Context Critical!",
-                f"Token usage at {percent}%! Handoff copied to clipboard.",
-                urgency='critical'
-            )
-            self._last_notification_threshold = 80
-        elif percent >= 60 and self._last_notification_threshold < 60:
-            self.send_notification(
-                "⚡ Context Warning",
-                f"Token usage at {percent}%. Consider wrapping up soon.",
-                urgency='warning'
-            )
-            self._last_notification_threshold = 60
-        elif percent < 50:  # Reset when usage drops (new session)
-            self._last_notification_threshold = 0
-
     def load_session(self):
         sessions = self.get_sessions()
         if not sessions:
@@ -645,7 +528,6 @@ $sb.ToString()
         delta = tokens_used - self.last_tokens if self.last_tokens > 0 else 0
         
         self.current_percent = percent
-        self.check_and_notify(percent)
         self.draw_gauge(percent)
         
         # Save history (throttle: save max once per 5 mins)
@@ -777,37 +659,9 @@ Read those logs to understand what we were working on, then continue helping me.
         self.drag_x = event.x
         self.drag_y = event.y
         
-
-    def snap_to_edge(self, x, y):
-        """Snap window to screen edges when close (Sprint 4: Feature 3.5)"""
-        snap_distance = 20  # pixels to trigger snap
-        
-        # Get screen dimensions
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        window_width = self.root.winfo_width()
-        window_height = self.root.winfo_height()
-        
-        # Snap to left edge
-        if x < snap_distance:
-            x = 0
-        # Snap to right edge
-        elif x > screen_width - window_width - snap_distance:
-            x = screen_width - window_width
-        
-        # Snap to top edge
-        if y < snap_distance:
-            y = 0
-        # Snap to bottom edge
-        elif y > screen_height - window_height - snap_distance:
-            y = screen_height - window_height
-        
-        return x, y
-
     def drag(self, event):
         x = self.root.winfo_x() + event.x - self.drag_x
         y = self.root.winfo_y() + event.y - self.drag_y
-        x, y = self.snap_to_edge(x, y)
         self.root.geometry(f"+{x}+{y}")
         
     def load_settings(self):
@@ -934,47 +788,6 @@ Read those logs to understand what we were working on, then continue helping me.
         except Exception as e:
             print(f"History flush error: {e}")
 
-
-    def export_history_csv(self, session_id=None):
-        """Export token history to CSV file (Sprint 3: Feature 2.4)"""
-        import csv
-        from datetime import datetime
-        from pathlib import Path
-        
-        downloads_folder = Path.home() / 'Downloads'
-        
-        data = self.load_history()
-        if session_id:
-            # Export single session
-            sessions_to_export = {session_id: data.get(session_id, [])}
-        else:
-            # Export all sessions
-            sessions_to_export = data
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = downloads_folder / f'context_monitor_export_{timestamp}.csv'
-        
-        try:
-            with open(filename, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['Session ID', 'Project', 'Timestamp', 'Tokens', 'Delta', 'Percent Used'])
-                
-                context_window = 200000
-                for sid, history in sessions_to_export.items():
-                    project_name = self.get_project_name(sid) if sid in self.project_name_cache else sid[:16]
-                    for entry in history:
-                        ts = datetime.fromtimestamp(entry['ts']).strftime('%Y-%m-%d %H:%M:%S')
-                        tokens = entry.get('tokens', 0)
-                        delta = entry.get('delta', 0)
-                        percent = round((tokens / context_window) * 100, 1)
-                        writer.writerow([sid, project_name, ts, tokens, delta, percent])
-            
-            messagebox.showinfo("Export Complete", f"History exported to:\n{filename}")
-            return str(filename)
-        except Exception as e:
-            messagebox.showerror("Export Failed", f"Error exporting: {e}")
-            return None
-
     def show_history(self):
         """Show usage history graph with time labels"""
         if not self.current_session:
@@ -993,8 +806,6 @@ Read those logs to understand what we were working on, then continue helping me.
         win.geometry("500x350")
         win.configure(bg=self.colors['bg'])
         win.attributes('-topmost', True)
-        win.resizable(True, True)  # Make resizable
-        win.minsize(400, 280)  # Minimum size
         
         # Title
         tk.Label(win, text=f"📊 {self.get_project_name(sid)}", 
@@ -1183,7 +994,6 @@ Read those logs to understand what we were working on, then continue helping me.
         menu.add_command(label="  📊  Show Diagnostics", command=self.show_diagnostics)
         menu.add_command(label="  📈  Advanced Token Stats", command=self.show_advanced_stats)
         menu.add_command(label="  📅  Usage History Graph", command=self.show_history)
-        menu.add_command(label="🔔 Toggle Notifications", command=lambda: setattr(self, "notifications_enabled", not getattr(self, "notifications_enabled", True)))
         menu.add_separator()
         
         # Actions section
