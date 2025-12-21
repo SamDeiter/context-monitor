@@ -473,12 +473,12 @@ $sb.ToString()
 
     def get_project_name(self, session_id):
         """Extract project name using multiple detection strategies"""
-        # Check cache first (but invalidate after 10 seconds for active detection)
+        # Check cache first (60 second cache to prevent PowerShell lag)
         import time
         now = time.time()
         if session_id in self.project_name_cache:
             if session_id in self.project_name_timestamp:
-                if now - self.project_name_timestamp[session_id] < 10:  # Reduced from 60s for faster detection
+                if now - self.project_name_timestamp[session_id] < 60:  # 60s cache
                     return self.project_name_cache[session_id]
         
         project_name = None
