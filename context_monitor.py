@@ -136,7 +136,7 @@ class ContextMonitor:
         else:
             # Full mode - reset transparency
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"280x200+{x_pos}+{y_pos}")
+            self.root.geometry(f"320x260+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -219,6 +219,22 @@ class ContextMonitor:
                                           bg=self.colors['bg2'], fg=self.colors['text2'])
             self.session_label.pack(anchor='w')
             self.session_label.bind('<Button-3>', self.show_context_menu)
+            
+            # Mini history panel (right side) - shows recent deltas
+            history_frame = tk.Frame(main, bg=self.colors['bg3'], padx=6, pady=4)
+            history_frame.pack(side='right', fill='y', padx=(8, 0))
+            history_frame.bind('<Button-3>', self.show_context_menu)
+            
+            tk.Label(history_frame, text="RECENT", font=('Segoe UI', 7),
+                    bg=self.colors['bg3'], fg=self.colors['muted']).pack(anchor='center')
+            
+            self.history_labels = []
+            for i in range(5):  # Show last 5 deltas
+                lbl = tk.Label(history_frame, text="—", font=('Consolas', 8),
+                              bg=self.colors['bg3'], fg=self.colors['text2'])
+                lbl.pack(anchor='e')
+                lbl.bind('<Button-3>', self.show_context_menu)
+                self.history_labels.append(lbl)
             
             # Status bar with copy button
             self.status_frame = tk.Frame(content, bg=self.colors['bg3'], padx=8, pady=6)
@@ -396,50 +412,43 @@ $sb.ToString()
 
     def get_project_name(self, session_id):
         """Extract project name using multiple detection strategies"""
-        # Check cache first (but invalidate after 30 seconds for active detection)
+        # Check cache first (but invalidate after 10 seconds for active detection)
         import time
         now = time.time()
         if session_id in self.project_name_cache:
             if session_id in self.project_name_timestamp:
-                if now - self.project_name_timestamp[session_id] < 60:
+                if now - self.project_name_timestamp[session_id] < 10:  # Reduced from 60s for faster detection
                     return self.project_name_cache[session_id]
         
         project_name = None
 
-        # Strategy 1: Parse from conversation file (Fastest & non-intrusive)
-        try:
-            pb_file = self.conversations_dir / f"{session_id}.pb"
-            if pb_file.exists():
-                # Read file content and search for project patterns
-                content = pb_file.read_bytes()
-                text = content.decode('utf-8', errors='ignore')
-                
-                # Look for CorpusName pattern (most reliable)
-                patterns = [
-                    r'CorpusName[:\s]+([A-Za-z0-9_-]+/[A-Za-z0-9_-]+)',  # user/repo format
-                    r'([A-Za-z0-9_-]+/[A-Za-z0-9_-]+)\s+-\>',  # URI mapping format
-                    r'Documents[/\\]GitHub[/\\]([A-Za-z0-9_-]+)',  # GitHub folder path
-                    r'Active Document:.*GitHub[/\\]([A-Za-z0-9_-]+)[/\\]',  # Active document path
-                ]
-                
-                for pattern in patterns:
-                    match = re.search(pattern, text)
-                    if match:
-                        name = match.group(1)
-                        # Extract just the repo name if it's user/repo format
-                        if '/' in name:
-                            name = name.split('/')[-1]
-                        project_name = name
-                        break
-        except Exception as e:
-            print(f"Error getting project name from file: {e}")
+        # Strategy 1: Check active VS Code window (MOST RELIABLE for current project)
+        vscode_project = self.get_active_vscode_project()
+        if vscode_project:
+            project_name = vscode_project
 
-        # Strategy 2: Check active VS Code window (Slower, uses subprocess)
+        # Strategy 2: Parse from conversation file - look for ACTIVE DOCUMENT path only
         if not project_name:
-            vscode_project = self.get_active_vscode_project()
-            if vscode_project:
-                project_name = vscode_project
-        
+            try:
+                pb_file = self.conversations_dir / f"{session_id}.pb"
+                if pb_file.exists():
+                    # Read only the last 50KB for recent context (faster & more accurate)
+                    with open(pb_file, 'rb') as f:
+                        f.seek(0, 2)  # Seek to end
+                        size = f.tell()
+                        start = max(0, size - 50000)  # Last 50KB
+                        f.seek(start)
+                        content = f.read()
+                    text = content.decode('utf-8', errors='ignore')
+                    
+                    # Only look for Active Document path (most reliable for current context)
+                    pattern = r'Active Document:.*GitHub[/\\]([A-Za-z0-9_-]+)[/\\]'
+                    matches = list(re.finditer(pattern, text))
+                    if matches:
+                        project_name = matches[-1].group(1)  # Use last (most recent) match
+            except Exception as e:
+                print(f"Error getting project name from file: {e}")
+
         # Strategy 3: Check recently modified GitHub folder
         if not project_name:
             recent_project = self.get_recently_modified_project()
@@ -505,6 +514,32 @@ $sb.ToString()
             # Update tray icon
             if HAS_TRAY:
                 self.update_tray_icon()
+            
+            # Update mini history panel with recent deltas
+            if hasattr(self, 'history_labels'):
+                history_data = self.load_history().get(self.current_session['id'], [])
+                # Get last 5 entries with non-zero deltas
+                recent_deltas = [h for h in history_data if h.get('delta', 0) != 0][-5:]
+                
+                for i, lbl in enumerate(self.history_labels):
+                    if i < len(recent_deltas):
+                        d = recent_deltas[-(i+1)]  # Reverse order (newest first)
+                        delta_val = d.get('delta', 0)
+                        if delta_val > 0:
+                            text = f"+{delta_val:,}"
+                            # Color based on magnitude
+                            if delta_val > 5000:
+                                color = self.colors['red']
+                            elif delta_val > 2000:
+                                color = self.colors['yellow']
+                            else:
+                                color = self.colors['green']
+                        else:
+                            text = f"{delta_val:,}"
+                            color = self.colors['blue']
+                        lbl.config(text=text, fg=color)
+                    else:
+                        lbl.config(text="—", fg=self.colors['muted'])
             
             # Update status and auto-copy at 80%
             if percent >= 80:
@@ -657,7 +692,7 @@ Read those logs to understand what we were working on, then continue helping me.
         self.last_tokens = tokens
         
         # Throttle based on polling interval (convert ms to seconds, minimum 5s)
-        throttle_seconds = max(5, self.polling_interval / 1000)
+        throttle_seconds = max(2, self.polling_interval / 1000)  # Reduced from 5s for faster updates
         
         if not hasattr(self, 'last_history_save'):
             self.last_history_save = 0
@@ -1123,7 +1158,7 @@ Read those logs to understand what we were working on, then continue helping me.
             print(f"Error launching Antigravity: {e}")
     
     def show_advanced_stats(self):
-        """Show detailed token usage breakdown"""
+        """Show detailed token usage breakdown with visual bars"""
         if not self.current_session:
             messagebox.showinfo("Advanced Stats", "No active session found.")
             return
@@ -1137,61 +1172,142 @@ Read those logs to understand what we were working on, then continue helping me.
             
             # Calculate token estimates
             file_size = conv_file.stat().st_size
-            total_tokens = file_size // 4
-            
-            # Estimate breakdown (since we can't parse protobuf easily)
-            # Typical ratio is ~40% input, ~60% output
-            estimated_input = int(total_tokens * 0.4)
-            estimated_output = int(total_tokens * 0.6)
-            
             context_window = 200000
             tokens_used = self.current_session['estimated_tokens'] // 10
             tokens_left = max(0, context_window - tokens_used)
             percent_used = min(100, round((tokens_used / context_window) * 100))
             
-            # Build detailed message
-            msg = "=== TOKEN USAGE BREAKDOWN ===\n\n"
-            msg += f"Context Window: {context_window:,} tokens\n"
-            msg += f"Tokens Used: {tokens_used:,} ({percent_used}%)\n"
-            msg += f"Tokens Remaining: {tokens_left:,}\n\n"
+            # Estimate breakdown
+            estimated_input = int(tokens_used * 0.4)
+            estimated_output = int(tokens_used * 0.6)
             
-            msg += "=== ESTIMATED BREAKDOWN ===\n"
-            msg += f"Input Tokens (User): ~{estimated_input:,}\n"
-            msg += f"Output Tokens (Assistant): ~{estimated_output:,}\n\n"
+            # Create window
+            win = tk.Toplevel(self.root)
+            win.title("📊 Advanced Token Statistics")
+            win.geometry("420x600")
+            win.configure(bg=self.colors['bg'])
+            win.attributes('-topmost', True)
+            win.resizable(False, False)
             
-            # Visual bar chart
-            msg += "=== USAGE VISUALIZATION ===\n"
-            bar_length = 40
-            used_bars = int((percent_used / 100) * bar_length)
-            remaining_bars = bar_length - used_bars
+            # Header
+            header = tk.Frame(win, bg=self.colors['bg3'], height=50)
+            header.pack(fill='x')
+            header.pack_propagate(False)
+            
+            tk.Label(header, text="📊 Token Usage Dashboard", 
+                    font=('Segoe UI', 14, 'bold'),
+                    bg=self.colors['bg3'], fg=self.colors['text']).pack(pady=12)
+            
+            # Main content
+            content = tk.Frame(win, bg=self.colors['bg'], padx=20, pady=15)
+            content.pack(fill='both', expand=True)
+            
+            def create_bar(parent, label, value, max_val, color, show_percent=True):
+                """Create a visual progress bar with label"""
+                frame = tk.Frame(parent, bg=self.colors['bg'])
+                frame.pack(fill='x', pady=8)
+                
+                # Label row
+                label_frame = tk.Frame(frame, bg=self.colors['bg'])
+                label_frame.pack(fill='x')
+                
+                tk.Label(label_frame, text=label, font=('Segoe UI', 10),
+                        bg=self.colors['bg'], fg=self.colors['text']).pack(side='left')
+                
+                if show_percent:
+                    pct = min(100, round((value / max_val) * 100)) if max_val > 0 else 0
+                    tk.Label(label_frame, text=f"{value:,} ({pct}%)", 
+                            font=('Segoe UI', 10, 'bold'),
+                            bg=self.colors['bg'], fg=color).pack(side='right')
+                else:
+                    tk.Label(label_frame, text=f"{value:,}", 
+                            font=('Segoe UI', 10, 'bold'),
+                            bg=self.colors['bg'], fg=color).pack(side='right')
+                
+                # Bar
+                bar_canvas = tk.Canvas(frame, width=380, height=20, 
+                                       bg=self.colors['bg3'], highlightthickness=0)
+                bar_canvas.pack(fill='x', pady=(4, 0))
+                
+                # Calculate bar width
+                pct = min(100, (value / max_val) * 100) if max_val > 0 else 0
+                bar_width = int((pct / 100) * 376)
+                
+                # Draw bar
+                if bar_width > 0:
+                    bar_canvas.create_rectangle(2, 2, bar_width + 2, 18, 
+                                               fill=color, outline='')
+                
+                return frame
+            
+            # Section: Context Window Usage
+            tk.Label(content, text="CONTEXT WINDOW", font=('Segoe UI', 9),
+                    bg=self.colors['bg'], fg=self.colors['muted']).pack(anchor='w', pady=(0, 5))
+            
+            # Choose color based on usage
+            if percent_used >= 80:
+                usage_color = self.colors['red']
+            elif percent_used >= 60:
+                usage_color = self.colors['yellow']
+            else:
+                usage_color = self.colors['green']
+            
+            create_bar(content, "Tokens Used", tokens_used, context_window, usage_color)
+            create_bar(content, "Tokens Remaining", tokens_left, context_window, self.colors['blue'])
+            
+            # Separator
+            tk.Frame(content, bg=self.colors['bg3'], height=1).pack(fill='x', pady=15)
+            
+            # Section: Estimated Breakdown
+            tk.Label(content, text="ESTIMATED BREAKDOWN", font=('Segoe UI', 9),
+                    bg=self.colors['bg'], fg=self.colors['muted']).pack(anchor='w', pady=(0, 5))
+            
+            create_bar(content, "Input (Your messages)", estimated_input, tokens_used, self.colors['blue'])
+            create_bar(content, "Output (Assistant)", estimated_output, tokens_used, self.colors['green'])
+            
+            # Separator
+            tk.Frame(content, bg=self.colors['bg3'], height=1).pack(fill='x', pady=15)
+            
+            # Section: Session Info
+            tk.Label(content, text="SESSION INFO", font=('Segoe UI', 9),
+                    bg=self.colors['bg'], fg=self.colors['muted']).pack(anchor='w', pady=(0, 5))
+            
+            info_frame = tk.Frame(content, bg=self.colors['bg2'], padx=10, pady=10)
+            info_frame.pack(fill='x')
+            
+            project_name = self.get_project_name(self.current_session['id'])
+            
+            info_items = [
+                ("Project", project_name),
+                ("File Size", f"{file_size / (1024*1024):.2f} MB"),
+                ("Session ID", f"{self.current_session['id'][:16]}..."),
+            ]
+            
+            for label, value in info_items:
+                row = tk.Frame(info_frame, bg=self.colors['bg2'])
+                row.pack(fill='x', pady=2)
+                tk.Label(row, text=label, font=('Segoe UI', 9),
+                        bg=self.colors['bg2'], fg=self.colors['muted']).pack(side='left')
+                tk.Label(row, text=value, font=('Segoe UI', 9),
+                        bg=self.colors['bg2'], fg=self.colors['text']).pack(side='right')
+            
+            # Status/Recommendation at bottom
+            status_frame = tk.Frame(win, bg=self.colors['bg3'], height=50)
+            status_frame.pack(fill='x', side='bottom')
+            status_frame.pack_propagate(False)
             
             if percent_used >= 80:
-                bar_color = "🔴"
+                status_text = "🔴 CRITICAL: Start a new session soon!"
+                status_color = self.colors['red']
             elif percent_used >= 60:
-                bar_color = "🟡"
+                status_text = "⚠️ WARNING: Approaching context limit"
+                status_color = self.colors['yellow']
             else:
-                bar_color = "🟢"
+                status_text = "✅ Context usage is healthy"
+                status_color = self.colors['green']
             
-            msg += f"{bar_color} [{'█' * used_bars}{'░' * remaining_bars}] {percent_used}%\n\n"
-            
-            # File info
-            msg += "=== FILE INFORMATION ===\n"
-            msg += f"Conversation File: {conv_file.name}\n"
-            msg += f"File Size: {file_size / (1024*1024):.2f} MB\n"
-            msg += f"Session ID: {self.current_session['id'][:16]}...\n\n"
-            
-            # Recommendations
-            msg += "=== RECOMMENDATIONS ===\n"
-            if percent_used >= 80:
-                msg += "🔴 CRITICAL: Start a new session soon!\n"
-                msg += "   → Use 'Copy Handoff' to transition\n"
-            elif percent_used >= 60:
-                msg += "🟡 WARNING: Approaching context limit\n"
-                msg += "   → Plan to wrap up current task\n"
-            else:
-                msg += "✅ Context usage is healthy\n"
-            
-            messagebox.showinfo("Advanced Token Statistics", msg)
+            tk.Label(status_frame, text=status_text, font=('Segoe UI', 10, 'bold'),
+                    bg=self.colors['bg3'], fg=status_color).pack(pady=14)
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to generate stats: {e}")
