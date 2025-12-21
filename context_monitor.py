@@ -58,7 +58,6 @@ class ContextMonitor:
         # State
         self.drag_x = 0
         self.drag_y = 0
-        self.drag_y = 0
         self.current_session = None
         self.selected_session_id = None  # Manually selected session
         self.handoff_copied = False
@@ -75,6 +74,15 @@ class ContextMonitor:
         # Polling settings (in milliseconds)
         self.polling_interval = self.settings.get('polling_interval', 10000)  # Default 10s
         self.last_tokens = 0  # For delta tracking
+        
+        # History cache (Sprint 1: Performance)
+        self._history_cache = None
+        self._history_cache_time = 0
+        self._history_dirty = False  # Track if cache needs to be written
+        
+        # Threading for background updates (Sprint 1: Performance)
+        self._update_lock = threading.Lock()
+        self._pending_update = None
         
         # Paths
         self.conversations_dir = Path.home() / '.gemini' / 'antigravity' / 'conversations'
@@ -703,16 +711,32 @@ Read those logs to understand what we were working on, then continue helping me.
         self.save_settings()
     
     
-    def load_history(self):
+    def load_history(self, force_reload=False):
+        """Load history with caching (Sprint 1: Performance)"""
+        import time
+        now = time.time()
+        
+        # Return cache if valid (less than 30 seconds old)
+        if not force_reload and self._history_cache is not None:
+            if now - self._history_cache_time < 30:
+                return self._history_cache
+        
+        # Load from disk
         try:
             if self.history_file.exists():
                 with open(self.history_file, 'r') as f:
-                    return json.load(f)
-        except:
-            pass
-        return {}
+                    self._history_cache = json.load(f)
+                    self._history_cache_time = now
+                    return self._history_cache
+        except Exception as e:
+            print(f"History load error: {e}")
+        
+        self._history_cache = {}
+        self._history_cache_time = now
+        return self._history_cache
 
     def save_history(self, session_id, tokens):
+        """Save history with caching and deferred writes (Sprint 1: Performance)"""
         import time
         now = time.time()
         
@@ -720,38 +744,49 @@ Read those logs to understand what we were working on, then continue helping me.
         delta = tokens - self.last_tokens if self.last_tokens > 0 else 0
         self.last_tokens = tokens
         
-        # Throttle based on polling interval (convert ms to seconds, minimum 5s)
-        throttle_seconds = max(2, self.polling_interval / 1000)  # Reduced from 5s for faster updates
+        # Throttle based on polling interval (convert ms to seconds, minimum 2s)
+        throttle_seconds = max(2, self.polling_interval / 1000)
         
         if not hasattr(self, 'last_history_save'):
             self.last_history_save = 0
             
-        if now - self.last_history_save < throttle_seconds:
+        # Always update cache, but throttle disk writes
+        data = self.load_history()
+        if session_id not in data:
+            data[session_id] = []
+        
+        # Add point with delta
+        data[session_id].append({
+            'ts': now,
+            'tokens': tokens,
+            'delta': delta
+        })
+        
+        # Keep last 200 points per session
+        if len(data[session_id]) > 200:
+            data[session_id] = data[session_id][-200:]
+        
+        # Update cache
+        self._history_cache = data
+        self._history_dirty = True
+        
+        # Only write to disk if throttle time has passed
+        if now - self.last_history_save >= throttle_seconds:
+            self._flush_history_cache()
+            self.last_history_save = now
+    
+    def _flush_history_cache(self):
+        """Write cached history to disk (Sprint 1: Performance)"""
+        if not self._history_dirty or self._history_cache is None:
             return
             
         try:
-            data = self.load_history()
-            if session_id not in data:
-                data[session_id] = []
-            
-            # Add point with delta
-            data[session_id].append({
-                'ts': now,
-                'tokens': tokens,
-                'delta': delta
-            })
-            
-            # Keep last 200 points per session (more history)
-            if len(data[session_id]) > 200:
-                data[session_id] = data[session_id][-200:]
-                
             self.history_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.history_file, 'w') as f:
-                json.dump(data, f)
-                
-            self.last_history_save = now
+                json.dump(self._history_cache, f)
+            self._history_dirty = False
         except Exception as e:
-            print(f"History save error: {e}")
+            print(f"History flush error: {e}")
 
     def show_history(self):
         """Show usage history graph with time labels"""
@@ -1540,6 +1575,7 @@ Read those logs to understand what we were working on, then continue helping me.
             print(f"Exit error: {e}")
         finally:
             # Force cleanup and exit
+            self._flush_history_cache()  # Save any pending history
             self._cleanup_processes()
             # Use os._exit to ensure all threads are terminated
             os._exit(0)

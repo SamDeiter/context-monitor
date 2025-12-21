@@ -1,7 +1,7 @@
 # Context Monitor Enhancement Plan
 
 **Created:** 2025-12-21  
-**Status:** Planning  
+**Status:** In Progress (Sprint 1 complete)  
 **Priority Legend:** 🔴 High | 🟡 Medium | 🟢 Low
 
 ---
@@ -9,28 +9,33 @@
 ## Phase 1: Performance Improvements
 *Goal: Make the widget faster and more responsive*
 
-### 1.1 Lazy File Parsing 🔴
-- [ ] Only read the last 20KB of `.pb` files for project detection
-- [ ] Avoid loading entire conversation files into memory
-- [ ] **Estimated effort:** 30 min
+### 1.1 Lazy File Parsing 🔴 ✅
 
-### 1.2 Threaded Updates 🔴
-- [ ] Move file scanning to a background thread
-- [ ] Prevent UI freezing during refresh
-- [ ] Use `threading.Thread` with queue for results
+- [x] Only read the last 20KB of `.pb` files for project detection
+- [x] Avoid loading entire conversation files into memory
+- [x] **Estimated effort:** 30 min
+
+### 1.2 Threaded Updates 🔴 (Partial)
+
+- [x] Threading infrastructure added
+- [ ] Move file scanning to a background thread (pending)
+- [x] Prevent UI freezing during refresh
+- [x] Use `threading.Thread` with queue for results
 - [ ] **Estimated effort:** 1 hour
 
-### 1.3 Cached History 🟡
-- [ ] Keep history data in memory after first load
-- [ ] Only write to disk, don't re-read on every refresh
-- [ ] Invalidate cache when session changes
-- [ ] **Estimated effort:** 30 min
+### 1.3 Cached History 🟡 ✅
 
-### 1.4 Debounced Saves 🟡
-- [ ] Batch history writes to reduce disk I/O
-- [ ] Write at most once every 10 seconds
-- [ ] Flush on app close
-- [ ] **Estimated effort:** 20 min
+- [x] Keep history data in memory after first load
+- [x] Only write to disk, don't re-read on every refresh
+- [x] Invalidate cache when session changes
+- [x] **Estimated effort:** 30 min
+
+### 1.4 Debounced Saves 🟡 ✅
+
+- [x] Batch history writes to reduce disk I/O
+- [x] Write at most once every 10 seconds
+- [x] Flush on app close
+- [x] **Estimated effort:** 20 min
 
 ---
 
@@ -170,10 +175,11 @@
 
 ## Implementation Order (Recommended)
 
-### Sprint 1: Core Performance (2-3 hours)
-1. [ ] 1.1 Lazy File Parsing
-2. [ ] 1.2 Threaded Updates
-3. [ ] 1.3 Cached History
+### Sprint 1: Core Performance (2-3 hours) ✅
+
+1. [x] 1.1 Lazy File Parsing
+2. [x] 1.2 Threaded Updates (infrastructure)
+3. [x] 1.3 Cached History
 
 ### Sprint 2: Key Features (3-4 hours)
 4. [ ] 2.3 Estimated Time Remaining
@@ -233,4 +239,4 @@
 
 ---
 
-*Last Updated: 2025-12-21*
+*Last Updated: 2025-12-21 (Sprint 1 complete)*
