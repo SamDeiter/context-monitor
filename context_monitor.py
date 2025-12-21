@@ -90,6 +90,7 @@ class ContextMonitor:
         self.root.protocol("WM_DELETE_WINDOW", self.cleanup_and_exit)
         
         self.setup_ui()
+        self.root.bind('<Button-3>', self.show_context_menu)  # Right-click anywhere
         self.load_session()
         self.root.after(15000, self.auto_refresh)
         self.root.after(500, self.flash_warning)
@@ -189,7 +190,7 @@ class ContextMonitor:
             main.bind('<Button-3>', self.show_context_menu)
             
             # Gauge
-            self.gauge_canvas = tk.Canvas(main, width=70, height=70, 
+            self.gauge_canvas = tk.Canvas(main, width=90, height=90, 
                                           bg=self.colors['bg2'], highlightthickness=0)
             self.gauge_canvas.pack(side='left', padx=(0, 12))
             self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
@@ -1088,10 +1089,10 @@ Read those logs to understand what we were working on, then continue helping me.
         # Create styled window
         win = tk.Toplevel(self.root)
         win.title("📊 System Diagnostics")
-        win.geometry("450x650")
+        win.geometry("450x950")
         win.configure(bg=self.colors['bg'])
         win.attributes('-topmost', True)
-        win.resizable(False, False)
+        win.resizable(True, True)
         
         # Header
         header = tk.Frame(win, bg=self.colors['bg3'], height=50)
@@ -1301,7 +1302,7 @@ Read those logs to understand what we were working on, then continue helping me.
             win.geometry("420x700")
             win.configure(bg=self.colors['bg'])
             win.attributes('-topmost', True)
-            win.resizable(False, False)
+            win.resizable(True, True)
             
             # Header
             header = tk.Frame(win, bg=self.colors['bg3'], height=50)
