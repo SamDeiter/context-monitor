@@ -1010,16 +1010,40 @@ Read those logs to understand what we were working on, then continue helping me.
         
         current_id = self.current_session['id'] if self.current_session else None
         
-        # Get top 5 sessions
-        sessions = self.get_sessions()[:5]
+        # Get sessions and group by project
+        sessions = self.get_sessions()[:15]  # Get more sessions to find multiple projects
+        from functools import partial
+        from collections import OrderedDict
+        
+        # Group sessions by project name
+        projects = OrderedDict()
         for s in sessions:
-            # Format: "Project Name (ID...)" or "ID..."
             name = self.get_project_name(s['id'])
-            label = f"{'✓ ' if s['id'] == current_id else '  '}{name}"
-            # Use partial to capture the loop variable
-            from functools import partial
-            sessions_menu.add_command(label=label, 
-                                    command=partial(self.switch_session, s['id']))
+            if name not in projects:
+                projects[name] = []
+            projects[name].append(s)
+        
+        # Show up to 3 sessions per project, max 10 total
+        shown = 0
+        for project_name, proj_sessions in projects.items():
+            if shown >= 10:
+                break
+            # Add project header if multiple projects
+            if len(projects) > 1:
+                sessions_menu.add_command(label=f"── {project_name} ──", state='disabled')
+            
+            for s in proj_sessions[:3]:  # Max 3 per project
+                if shown >= 10:
+                    break
+                check = "✓ " if s['id'] == current_id else "  "
+                short_id = s['id'][:8]
+                label = f"{check}{project_name} ({short_id}...)"
+                sessions_menu.add_command(label=label, 
+                                        command=partial(self.switch_session, s['id']))
+                shown += 1
+            
+            if len(projects) > 1:
+                sessions_menu.add_separator()
             
         menu.add_cascade(label="  🔀  Switch Session", menu=sessions_menu)
         menu.add_separator()
