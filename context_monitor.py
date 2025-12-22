@@ -576,8 +576,9 @@ $sb.ToString()
         # Save history (throttle: save max once per 5 mins)
         self.save_history(self.current_session['id'], tokens_used)
         
-        # Track analytics
-        project_name = self.get_project_name(self.current_session['id'])
+        # Track analytics - skip VS Code detection if session was manually selected
+        is_manual_session = self.selected_session_id is not None
+        project_name = self.get_project_name(self.current_session['id'], skip_vscode=is_manual_session)
         self.save_analytics(tokens_used, project_name)
         
         if not self.mini_mode:
@@ -592,8 +593,9 @@ $sb.ToString()
                 else:
                     self.delta_label.config(text="— no change", fg=self.colors['muted'])
             
-            project_name = self.get_project_name(self.current_session['id'])
-            self.session_label.config(text=project_name)
+            # Use project name from file if session was manually selected
+            display_name = self.get_project_name(self.current_session['id'], skip_vscode=is_manual_session)
+            self.session_label.config(text=display_name)
             
             # Update tray icon
             if HAS_TRAY:
