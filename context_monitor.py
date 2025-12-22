@@ -693,13 +693,11 @@ Read those logs to understand what we were working on, then continue helping me.
         
     def switch_session(self, session_id):
         """Manually switch to a specific session"""
-        print(f"[Switch] Switching to session: {session_id}")
         self.selected_session_id = session_id
         # Clear project name cache for this session to force refresh
         if session_id in self.project_name_cache:
             del self.project_name_cache[session_id]
         self.load_session()
-        print(f"[Switch] Current session is now: {self.current_session['id'] if self.current_session else 'None'}")
     
     def set_polling_speed(self, interval_ms):
         """Set the polling interval in milliseconds"""
