@@ -14,15 +14,18 @@ A sleek, always-on-top desktop widget for tracking Antigravity IDE token usage a
 
 * **Real-time Tracking**: Visual gauge of your context window usage.
 * **Smart Handoff**: Auto-copies a handoff prompt when you hit 80% usage.
+* **Analytics Dashboard**: Track daily usage, set budgets, and view history graphs.
+* **Session Archiving**: Compress old sessions to save disk space with one click.
+* **Multi-Project**: Smart detection of project context across multiple workspaces.
 * **Zero Distraction**: Borderless, always-on-top, and transparent window.
 * **Performance First**: Uses <1% CPU with smart polling and lazy detection.
-* **Power Tools**: Right-click for diagnostics, stats, and one-click IDE restart.
 
 ## 🚀 Quick Start
 
 1. **Run**: Double-click `launch.bat`.
 2. **Toggle**: Press `M` for mini mode.
-3. **Refresh**: Press `R` to force update.
+3. **Dashboard**: Press `D` for analytics.
+4. **Refresh**: Press `R` to force update.
 
 ## 📂 Repository Structure
 

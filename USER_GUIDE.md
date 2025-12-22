@@ -25,6 +25,8 @@ This guide provides comprehensive instructions for installing, using, and troubl
 * **Full Mode (Default)**: Shows tokens remaining, percentage used, active project name, and status messages.
 * **Mini Mode**: A compact circular gauge showing only the percentage.
 * **Toggle**: Press `M` or right-click and select **Toggle Mini Mode**.
+* **Dashboard**: Press `D` to open the Analytics Dashboard.
+* **Export**: Press `E` to export token history to CSV.
 
 ### Transparency
 
@@ -34,6 +36,24 @@ This guide provides comprehensive instructions for installing, using, and troubl
 ### Drag & Drop
 
 * Click and drag anywhere on the widget to move it around your screen. It stays on top of other windows.
+
+### Analytics & Budgeting (New)
+
+The monitor now includes powerful tools to track your usage:
+
+* **Dashboard (D)**: Displays daily token usage, cost estimates, and history graphs.
+* **Daily Budget**: Set a token limit (e.g., 2,000,000) in the dashboard.
+  * You get a notification at **75%** usage.
+  * You get a critical alert at **90%** usage.
+* **CSV Export (E)**: Download your usage history for spreadsheet analysis.
+
+### Session Archiving
+
+To save disk space without losing history:
+
+1. Right-click and select **📦 Archive Old Sessions**.
+2. This compresses sessions older than 3 days into `.pb.gz` files.
+3. Archived sessions **still appear** in the "Switch Session" menu and unarchive automatically when selected.
 
 ### Right-Click Menu
 
@@ -69,8 +89,8 @@ Right-click the widget to access:
 
 ### Project name isn't updating
 
-* The widget prioritizes checking saved conversation files for speed. It may take up to 60 seconds to update after switching projects.
-* Ensure you have a file open in the new project.
+* The widget checks `brain/` folder metadata for project names, which is much faster and more accurate than before.
+* Switching projects is instant, but the file scan happens in the background.
 
 ### High Memory Usage
 

@@ -42,7 +42,9 @@ ContextMonitor (Main Application)
 ├── get_project_name()   # Multi-strategy project detection
 ├── show_context_menu()  # Right-click menu
 ├── show_advanced_stats()# Detailed token breakdown
+├── show_analytics_dashboard() # Usage history and budget
 ├── show_diagnostics()   # System health check
+├── archive_old_sessions() # Gzip compression for old files
 └── run()                # Main event loop
 
 ToolTip (Helper Class)
@@ -57,7 +59,9 @@ ToolTip (Helper Class)
 ┌─────────────────────────────────────────────────────────┐
 │                    File System                          │
 │  ~/.gemini/antigravity/conversations/*.pb               │
-│  ~/.gemini/antigravity/brain/<session>/                 │
+│  ~/.gemini/antigravity/conversations/*.pb               │
+│  ~/.gemini/antigravity/conversations/*.pb.gz            │
+│  ~/.gemini/antigravity/brain/<session>/*.md             │
 └─────────────────────┬───────────────────────────────────┘
                       │
                       ▼
@@ -90,9 +94,9 @@ percent_used = (tokens_used / context_window) * 100
 
 ### Project Detection Strategy
 
-1. **VS Code Window Title** - Extract from active VS Code window
-2. **Recently Modified GitHub** - Check `.git/index` timestamps
-3. **Conversation File Parsing** - Search for CorpusName patterns
+1. **Brain Folder Metadata** - Check `brain/{id}/*.md` for project context
+2. **VS Code Window Title** - Extract from active VS Code window (fallback)
+3. **Recently Modified GitHub** - Check `.git/index` timestamps (fallback)
 4. **Fallback** - Truncated session ID
 
 ### Hardware-Adaptive Thresholds
