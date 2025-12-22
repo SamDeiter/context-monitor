@@ -529,6 +529,25 @@ $sb.ToString()
             except Exception as e:
                 print(f"Error getting project name from file: {e}")
 
+        # Strategy 2.5: Check code_tracker/active folders - they contain project name + commit hash
+        if not project_name:
+            try:
+                code_tracker_dir = Path.home() / '.gemini' / 'antigravity' / 'code_tracker' / 'active'
+                if code_tracker_dir.exists():
+                    # Get most recently modified folder that matches a project pattern
+                    folders = sorted(code_tracker_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)
+                    for folder in folders[:20]:  # Check top 20 most recent
+                        name = folder.name
+                        # Extract project name (format: ProjectName_commithash)
+                        if '_' in name and len(name.split('_')[-1]) == 40:  # 40 char hash
+                            extracted = name.rsplit('_', 1)[0]
+                            # Check if this folder relates to our session by looking at recent activity
+                            if extracted.lower() not in ['no_repo']:
+                                project_name = extracted
+                                break
+            except Exception as e:
+                print(f"Error checking code_tracker: {e}")
+
         # Strategy 3: Check recently modified GitHub folder
         if not project_name:
             recent_project = self.get_recently_modified_project()
