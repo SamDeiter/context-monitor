@@ -496,38 +496,32 @@ $sb.ToString()
             if vscode_project:
                 project_name = vscode_project
 
-        # Strategy 2: Parse from conversation file - look for ACTIVE DOCUMENT path only
+        # Strategy 2: Check brain folder for this session - has markdown files with project info
         if not project_name:
             try:
-                pb_file = self.conversations_dir / f"{session_id}.pb"
-                gz_file = self.conversations_dir / f"{session_id}.pb.gz"
-                
-                content = None
-                if pb_file.exists():
-                    with open(pb_file, 'rb') as f:
-                        f.seek(0, 2)  # Seek to end
-                        size = f.tell()
-                        start = max(0, size - 50000)  # Last 50KB
-                        f.seek(start)
-                        content = f.read()
-                elif gz_file.exists():
-                    # Read compressed file
-                    import gzip
-                    with gzip.open(gz_file, 'rb') as f:
-                        # Can't seek in gzip, read all and take last 50KB
-                        full_content = f.read()
-                        content = full_content[-50000:] if len(full_content) > 50000 else full_content
-                
-                if content:
-                    text = content.decode('utf-8', errors='ignore')
-                    
-                    # Only look for Active Document path (most reliable for current context)
-                    pattern = r'Active Document:.*GitHub[/\\]([A-Za-z0-9_-]+)[/\\]'
-                    matches = list(re.finditer(pattern, text))
-                    if matches:
-                        project_name = matches[-1].group(1)  # Use last (most recent) match
+                brain_dir = Path.home() / '.gemini' / 'antigravity' / 'brain' / session_id
+                if brain_dir.exists():
+                    # Check markdown files for project name mentions
+                    for md_file in brain_dir.glob('*.md'):
+                        try:
+                            content = md_file.read_text(encoding='utf-8', errors='ignore')[:2000]
+                            # Look for project patterns
+                            if 'UE5' in content or 'Blueprint' in content:
+                                project_name = 'UE5LMSBlueprint'
+                                break
+                            elif 'context-monitor' in content.lower() or 'Context Monitor' in content:
+                                project_name = 'context-monitor'
+                                break
+                            # Check for GitHub folder pattern in content
+                            pattern = r'GitHub[/\\]([A-Za-z0-9_-]+)'
+                            match = re.search(pattern, content)
+                            if match:
+                                project_name = match.group(1)
+                                break
+                        except:
+                            pass
             except Exception as e:
-                print(f"Error getting project name from file: {e}")
+                print(f"Error checking brain folder: {e}")
 
         # Note: code_tracker detection removed - it picks most recent project globally, not session-specific
 
