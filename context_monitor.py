@@ -1841,7 +1841,16 @@ Read those logs to understand what we were working on, then continue helping me.
     def show_custom_toast(self, title, message, duration=5):
         """Show a non-blocking custom toast notification using Tkinter (replaces unstable win10toast)"""
         try:
+            # 1. Close existing toast if any (Singleton pattern)
+            if hasattr(self, '_current_toast') and self._current_toast:
+                try:
+                    self._current_toast.destroy()
+                except Exception:
+                    pass
+            
             toast = tk.Toplevel(self.root)
+            self._current_toast = toast  # Track current toast
+            
             toast.overrideredirect(True)
             toast.attributes('-topmost', True)
             toast.attributes('-alpha', 0.95)
