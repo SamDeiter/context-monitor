@@ -107,8 +107,55 @@ class ContextMonitor:
         self._last_notification_time = 0
         self._notifier = ToastNotifier() if HAS_TOAST else None
         self._daily_budget = self.settings.get('daily_budget', 1000000)  # Default 1M tokens/day
-        self._context_window = self.settings.get('context_window', 1000000)  # Default 1M tokens (Gemini 3 Pro)
+        self._context_window = self.settings.get('context_window', 1000000)
+        # Migration: Force reset from old 2.1M default to 1M safe limit
+        if self._context_window > 2000000:
+            self._context_window = 1000000
+        self.save_settings()
         
+        # Supported Models
+        self.MODELS = {
+            "Gemini 2.0 Flash": 1000000,
+            "Gemini 1.5 Pro": 2000000,
+            "Claude 3.5 Sonnet": 200000,
+            "GPT-4o": 128000,
+            "GPT-4 Turbo": 128000,
+            "Custom": None
+        }
+
+        # Initialize model setting if missing or mismatched
+        if 'model' not in self.settings:
+            current = "Custom"
+            for name, limit in self.MODELS.items():
+                if limit == self._context_window:
+                    current = name
+                    break
+            self.settings['model'] = current
+            self.save_settings()
+        
+        # Migration: Fix "Unknown" model in analytics
+        try:
+            analytics = self.load_analytics()
+            if 'models' in analytics and 'Unknown' in analytics['models']:
+                unknown_data = analytics['models'].pop('Unknown')
+                target_model = self.settings.get('model', 'Custom')
+                
+                if target_model not in analytics['models']:
+                    analytics['models'][target_model] = {'total': 0}
+                
+                analytics['models'][target_model]['total'] += unknown_data.get('total', 0)
+                
+                # Force save to disk
+                self._analytics_cache = analytics
+                with open(self.analytics_file, 'w') as f:
+                     json.dump({
+                        'daily': analytics['daily'],
+                        'projects': analytics.get('projects', {}),
+                        'models': analytics['models']
+                     }, f, indent=2)
+        except Exception as e:
+            print(f"Migration error: {e}")
+            
         # Hardware Scan
         self.total_ram_mb = self.get_total_memory()
         self.thresholds = self.calculate_thresholds()
@@ -1810,6 +1857,14 @@ Read those logs to understand what we were working on, then continue helping me.
             if project_name not in analytics['projects']:
                 analytics['projects'][project_name] = {'total': 0, 'sessions': []}
             analytics['projects'][project_name]['total'] += delta
+
+            # Model-level tracking
+            current_model = self.settings.get('model', 'Unknown')
+            if 'models' not in analytics:
+                analytics['models'] = {}
+            if current_model not in analytics['models']:
+                analytics['models'][current_model] = {'total': 0}
+            analytics['models'][current_model]['total'] += delta
         
         self._analytics_cache = analytics
         
@@ -1819,7 +1874,8 @@ Read those logs to understand what we were working on, then continue helping me.
                 self.analytics_file.parent.mkdir(parents=True, exist_ok=True)
                 save_data = {
                     'daily': analytics['daily'],
-                    'projects': {k: {'total': v['total']} for k, v in analytics['projects'].items()}
+                    'projects': {k: {'total': v['total']} for k, v in analytics['projects'].items()},
+                    'models': analytics.get('models', {})
                 }
                 with open(self.analytics_file, 'w') as f:
                     json.dump(save_data, f, indent=2)
@@ -1865,11 +1921,15 @@ Read those logs to understand what we were working on, then continue helping me.
             
         context_window = self._context_window
         
-        if percent >= 90:
-            print(f"ALERTS: Context window 90% full! ({tokens_used:,} / {context_window:,} tokens)")
-            self._last_context_alert_time = now
-        elif percent >= 80:
-            print(f"ALERTS: Context window 80% full ({tokens_used:,} / {context_window:,} tokens)")
+        if percent >= 80:
+            # Force show widget so user sees the red status and copied handoff
+            self.restore_from_tray()
+            
+            if percent >= 90:
+                print(f"ALERTS: Context window 90% full! ({tokens_used:,} / {context_window:,} tokens)")
+            else:
+                print(f"ALERTS: Context window 80% full ({tokens_used:,} / {context_window:,} tokens)")
+                
             self._last_context_alert_time = now
 
     def calculate_time_to_handoff(self):
@@ -1957,11 +2017,11 @@ Read those logs to understand what we were working on, then continue helping me.
         return projects[:10]  # Top 10
     
     def show_analytics_dashboard(self):
-        """Show comprehensive analytics dashboard with auto-refresh"""
+        """Show comprehensive analytics dashboard with auto-refresh and flicker-free updates"""
         # Create window
         win = tk.Toplevel(self.root)
         win.title("Analytics Dashboard")
-        win.geometry("600x600")
+        win.geometry("650x800") # Safer height, use scrollbar
         win.configure(bg=self.colors['bg'])
         win.attributes('-topmost', True)
         win.resizable(True, True)
@@ -1971,13 +2031,53 @@ Read those logs to understand what we were working on, then continue helping me.
                 font=('Segoe UI', 14, 'bold'),
                 bg=self.colors['bg'], fg=self.colors['text']).pack(pady=(15, 10))
         
-        # Main container with scrollbar
-        main_frame = tk.Frame(win, bg=self.colors['bg'])
-        main_frame.pack(fill='both', expand=True, padx=20, pady=10)
+        # Main container with ACTUAL scrollbar
+        container = tk.Frame(win, bg=self.colors['bg'])
+        container.pack(fill='both', expand=True, padx=20, pady=10)
+
+        canvas = tk.Canvas(container, bg=self.colors['bg'], highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        
+        main_frame = tk.Frame(canvas, bg=self.colors['bg'])
+        
+        # Configure scrolling
+        main_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas_frame = canvas.create_window((0, 0), window=main_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack scrollbar and canvas
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        
+        # Ensure frame width matches canvas
+        def on_canvas_configure(event):
+            canvas.itemconfig(canvas_frame, width=event.width)
+        canvas.bind("<Configure>", on_canvas_configure)
+
+        # Allow mousewheel scrolling
+        def _on_mousewheel(event):
+            if canvas.winfo_exists():
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        # Bind mousewheel to canvas and all children
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        win.protocol("WM_DELETE_WINDOW", lambda: (canvas.unbind_all("<MouseWheel>"), win.destroy()))
         
         # ===== DYNAMIC CONTENT LABELS =====
-        # We'll store references to labels we need to update
         self._dashboard_refs = {}
+        
+        # 0. SESSION TREND GRAPH (Sparkline)
+        trend_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
+        trend_frame.pack(fill='x', pady=(0, 10))
+        tk.Label(trend_frame, text="📈 Session Trend (Last Hour)",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(anchor='w')
+        
+        self._dashboard_refs['trend_canvas'] = tk.Canvas(trend_frame, height=60, bg=self.colors['bg3'], highlightthickness=0)
+        self._dashboard_refs['trend_canvas'].pack(fill='x', pady=(5,0))
         
         # 1. TIME TO HANDOFF
         ttf_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
@@ -2010,32 +2110,179 @@ Read those logs to understand what we were working on, then continue helping me.
                 font=('Segoe UI', 9), bg=self.colors['bg2'], fg=self.colors['text'])
         self._dashboard_refs['usage_label'].pack(anchor='w')
         
-        # Reset Countdown (Midnight UTC)
-        # User reported reset aligns with 00:00 UTC
-        now_utc = datetime.utcnow()
-        today_reset = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Reset Countdown
         self._dashboard_refs['reset_label'] = tk.Label(today_frame, text="",
                 font=('Segoe UI', 8, 'italic'), bg=self.colors['bg2'], fg=self.colors['muted'])
         self._dashboard_refs['reset_label'].pack(anchor='w', pady=(2,0))
 
-        # 3. WEEKLY CHART & 4. PROJECTS (Re-rendered on update)
-        # We will create container frames for them
-        self._dashboard_refs['week_container'] = tk.Frame(main_frame, bg=self.colors['bg2'])
-        self._dashboard_refs['week_container'].pack(fill='x', pady=(0, 10))
+        # 3. WEEKLY CHART (Fixed Slots)
+        week_container = tk.Frame(main_frame, bg=self.colors['bg2'])
+        week_container.pack(fill='x', pady=(0, 10))
         
-        self._dashboard_refs['proj_container'] = tk.Frame(main_frame, bg=self.colors['bg2'])
-        self._dashboard_refs['proj_container'].pack(fill='both', expand=True)
+        week_frame_inner = tk.LabelFrame(week_container, text=" 📈 Last 7 Days ", 
+                                   bg=self.colors['bg2'], fg=self.colors['text'],
+                                   font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
+        week_frame_inner.pack(fill='x')
         
+        chart_frame = tk.Frame(week_frame_inner, bg=self.colors['bg2'])
+        chart_frame.pack(fill='x', expand=True)
+        
+        self._dashboard_refs['week_slots'] = []
+        for i in range(7):
+            col = tk.Frame(chart_frame, bg=self.colors['bg2'])
+            col.pack(side='left', expand=True, fill='both', padx=2)
+            
+            # Bar (uses place for dynamic height)
+            bar_container = tk.Frame(col, bg=self.colors['bg2'], height=60, width=30)
+            bar_container.pack(side='bottom')
+            bar = tk.Frame(bar_container, bg=self.colors['blue'])
+            bar.place(relx=0, rely=1.0, relwidth=1.0, relheight=0.0, anchor='sw')
+            
+            lbl_day = tk.Label(col, text="-", font=('Segoe UI', 8), bg=self.colors['bg2'], fg=self.colors['muted'])
+            lbl_day.pack(side='bottom')
+            
+            lbl_val = tk.Label(col, text="0", font=('Consolas', 7), bg=self.colors['bg2'], fg=self.colors['text2'])
+            lbl_val.pack(side='bottom')
+            
+            self._dashboard_refs['week_slots'].append({
+                'bar': bar, 'day': lbl_day, 'val': lbl_val
+            })
+
+        # 4. PROJECT LIST (Fixed Slots)
+        proj_container = tk.Frame(main_frame, bg=self.colors['bg2'])
+        proj_container.pack(fill='both', expand=True, pady=(0, 10))
+        
+        proj_frame = tk.LabelFrame(proj_container, text=" 🗂️ Token Usage by Project ",
+                               bg=self.colors['bg2'], fg=self.colors['text'],
+                               font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
+        proj_frame.pack(fill='both', expand=True)
+
+        self._dashboard_refs['proj_slots'] = []
+        for i in range(5): # Top 5 projects
+            row = tk.Frame(proj_frame, bg=self.colors['bg2'])
+            row.pack(fill='x', pady=2)
+            lbl_name = tk.Label(row, text="", font=('Segoe UI', 9),
+                    bg=self.colors['bg2'], fg=self.colors['text'], width=25, anchor='w')
+            lbl_name.pack(side='left')
+            lbl_val = tk.Label(row, text="", font=('Consolas', 9), bg=self.colors['bg2'], fg=self.colors['blue'])
+            lbl_val.pack(side='right')
+            self._dashboard_refs['proj_slots'].append({'row': row, 'name': lbl_name, 'val': lbl_val})
+            
+        # 5. PROJECT DISTRIBUTION (Stacked Bar)
+        dist_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
+        dist_frame.pack(fill='x')
+        tk.Label(dist_frame, text="📊 Project Distribution", font=('Segoe UI', 9),
+                bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(0,5))
+        
+        self._dashboard_refs['dist_bar'] = tk.Frame(dist_frame, bg=self.colors['bg3'], height=15)
+        self._dashboard_refs['dist_bar'].pack(fill='x')
+        # We will create sub-frames inside this bar dynamically (or use fixed slots if preferred, but dynamic is okay here as it's just a few rects)
+        
+        # ===== SYSTEM DIAGNOSTICS SECTION =====
+        diag_container = tk.Frame(main_frame, bg=self.colors['bg2'])
+        diag_container.pack(fill='x', pady=(20, 10))
+        
+        diag_frame = tk.LabelFrame(diag_container, text=" 🔧 System Health ",
+                               bg=self.colors['bg2'], fg=self.colors['text'],
+                               font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
+        diag_frame.pack(fill='x')
+        
+        # RAM Usage
+        self._dashboard_refs['ram_label'] = tk.Label(diag_frame, text="RAM: Calculating...", 
+                                        font=('Segoe UI', 9), bg=self.colors['bg2'], fg=self.colors['text'])
+        self._dashboard_refs['ram_label'].pack(anchor='w')
+        
+        # Process Count
+        self._dashboard_refs['proc_label'] = tk.Label(diag_frame, text="Processes: Calculating...",
+                                         font=('Segoe UI', 9), bg=self.colors['bg2'], fg=self.colors['text'])
+        self._dashboard_refs['proc_label'].pack(anchor='w', pady=(2, 0))
+        
+        # Top Systems Processes
+        tk.Label(diag_frame, text="Top Processes (RAM):", font=('Segoe UI', 9, 'bold'),
+                bg=self.colors['bg2'], fg=self.colors['text2']).pack(anchor='w', pady=(10, 5))
+                
+        self._dashboard_refs['proc_bars'] = []
+        for i in range(5):
+            f = tk.Frame(diag_frame, bg=self.colors['bg2'])
+            f.pack(fill='x', pady=2)
+            l = tk.Label(f, text="", font=('Consolas', 9), bg=self.colors['bg2'], fg=self.colors['text'], width=20, anchor='w')
+            l.pack(side='left')
+            b_bg = tk.Frame(f, bg=self.colors['bg3'], height=10)
+            b_bg.pack(side='left', fill='x', expand=True, padx=5)
+            b_fill = tk.Frame(b_bg, bg=self.colors['blue'], height=10)
+            b_fill.place(relx=0, rely=0, relwidth=0, relheight=1)
+            v = tk.Label(f, text="", font=('Consolas', 9), bg=self.colors['bg2'], fg=self.colors['text2'])
+            v.pack(side='right')
+            self._dashboard_refs['proc_bars'].append({'row': f, 'name': l, 'bar': b_fill, 'val': v})
+
+        # ===== MODEL USAGE SECTION =====
+        model_container = tk.Frame(main_frame, bg=self.colors['bg2'])
+        model_container.pack(fill='x', pady=(20, 10))
+        
+        model_frame = tk.LabelFrame(model_container, text=" 🤖 AI Model Usage ",
+                               bg=self.colors['bg2'], fg=self.colors['text'],
+                               font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
+        model_frame.pack(fill='x')
+        
+        self._dashboard_refs['model_bars'] = []
+        for i in range(4): # Top 4 models
+            f = tk.Frame(model_frame, bg=self.colors['bg2'])
+            f.pack(fill='x', pady=2)
+            l = tk.Label(f, text="", font=('Consolas', 9), bg=self.colors['bg2'], fg=self.colors['text'], width=20, anchor='w')
+            l.pack(side='left')
+            b_bg = tk.Frame(f, bg=self.colors['bg3'], height=10)
+            b_bg.pack(side='left', fill='x', expand=True, padx=5)
+            b_fill = tk.Frame(b_bg, bg=self.colors['green'], height=10)
+            b_fill.place(relx=0, rely=0, relwidth=0, relheight=1)
+            v = tk.Label(f, text="", font=('Consolas', 9), bg=self.colors['bg2'], fg=self.colors['text2'])
+            v.pack(side='right')
+            self._dashboard_refs['model_bars'].append({'row': f, 'name': l, 'bar': b_fill, 'val': v})
+
         # Start update loop
         self.update_dashboard_stats(win)
 
     def update_dashboard_stats(self, win):
-        """Update dashboard statistics recursively"""
+        """Update dashboard statistics flicker-free"""
         if not win.winfo_exists():
             return
             
         try:
-            # 1. Update Time to Handoff
+            analytics = self.load_analytics()
+            
+            # --- 0. UPDATE TREND GRAPH ---
+            # Get recent history points for current session
+            if self.current_session:
+                history = self.load_history().get(self.current_session['id'], [])
+                # Filter to last hour
+                cutoff = time.time() - 3600
+                recent = [h for h in history if h['ts'] > cutoff]
+                
+                canvas = self._dashboard_refs['trend_canvas']
+                canvas.delete('all')
+                
+                if len(recent) > 1:
+                    w = canvas.winfo_width()
+                    h = 60
+                    # Normalize
+                    min_ts = recent[0]['ts']
+                    time_span = recent[-1]['ts'] - min_ts or 1
+                    max_tok = max(p['tokens'] for p in recent)
+                    min_tok = min(p['tokens'] for p in recent)
+                    val_span = max_tok - min_tok or 1
+                    
+                    points = []
+                    for p in recent:
+                        x = (p['ts'] - min_ts) / time_span * w
+                        # Inverted Y (higher value = lower Y)
+                        y = h - ((p['tokens'] - min_tok) / val_span * (h - 10) + 5)
+                        points.append((x, y))
+                    
+                    if len(points) > 1:
+                        canvas.create_line(points, fill=self.colors['blue'], width=2, smooth=True)
+                        # End dot
+                        canvas.create_oval(points[-1][0]-3, points[-1][1]-3, points[-1][0]+3, points[-1][1]+3, fill=self.colors['green'], outline='')
+            
+            # --- 1. UPDATE TIME TO HANDOFF ---
             seconds_remaining = self.calculate_time_to_handoff()
             time_str = self.format_time_remaining(seconds_remaining)
             
@@ -2046,8 +2293,7 @@ Read those logs to understand what we were working on, then continue helping me.
             
             self._dashboard_refs['ttf_label'].config(text=time_str, fg=time_color)
             
-            # 2. Update Today's Usage
-            analytics = self.load_analytics()
+            # --- 2. UPDATE TODAY'S USAGE ---
             today = datetime.now().strftime('%Y-%m-%d')
             today_tokens = analytics['daily'].get(today, {}).get('total', 0)
             budget = self._daily_budget
@@ -2065,8 +2311,7 @@ Read those logs to understand what we were working on, then continue helping me.
                 text=f"{today_tokens:,} / {budget:,} tokens ({budget_pct:.0f}%)"
             )
             
-            # Reset Countdown (Midnight UTC)
-            # User reported reset aligns with 00:00 UTC
+            # Reset Countdown
             now_utc = datetime.utcnow()
             today_reset = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
             if now_utc >= today_reset:
@@ -2079,66 +2324,109 @@ Read those logs to understand what we were working on, then continue helping me.
             m = r // 60
             self._dashboard_refs['reset_label'].config(text=f"🔄 Daily Stats Reset in: {h}h {m}m (Midnight UTC)")
 
-            self._dashboard_refs['reset_label'].config(text=f"🔄 Daily Stats Reset in: {h}h {m}m (Midnight PT)")
-
-            # 3. WEEKLY CHART (Re-render)
-            for widget in self._dashboard_refs['week_container'].winfo_children():
-                widget.destroy()
-            
-            week_frame_inner = tk.LabelFrame(self._dashboard_refs['week_container'], text=" 📈 Last 7 Days ", 
-                                       bg=self.colors['bg2'], fg=self.colors['text'],
-                                       font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
-            week_frame_inner.pack(fill='x')
-            
+            # --- 3. UPDATE WEEKLY CHART ---
             weekly = self.get_weekly_summary()
-            max_tokens = max(d['tokens'] for d in weekly) if weekly else 1
+            weekly_rev = list(reversed(weekly)) # Left to right (Oldest to Newest)
+            max_tokens = max((d['tokens'] for d in weekly), default=1)
             
-            chart_frame = tk.Frame(week_frame_inner, bg=self.colors['bg2'])
-            chart_frame.pack(fill='x')
-            
-            for day in reversed(weekly):  # Most recent on right
-                col = tk.Frame(chart_frame, bg=self.colors['bg2'])
-                col.pack(side='left', expand=True, fill='both', padx=2)
-                
-                # Bar
-                bar_height = int((day['tokens'] / max_tokens) * 60) if max_tokens > 0 else 0
-                bar = tk.Frame(col, bg=self.colors['blue'], width=30, height=max(2, bar_height))
-                bar.pack(side='bottom')
-                
-                # Day label
-                tk.Label(col, text=day['day_name'], font=('Segoe UI', 8),
-                        bg=self.colors['bg2'], fg=self.colors['muted']).pack(side='bottom')
-                
-                # Token count
-                tokens_k = day['tokens'] / 1000
-                tk.Label(col, text=f"{tokens_k:.0f}k" if day['tokens'] > 0 else "0",
-                        font=('Consolas', 7), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='bottom')
+            for i, slot in enumerate(self._dashboard_refs['week_slots']):
+                if i < len(weekly_rev):
+                    day = weekly_rev[i]
+                    pct = (day['tokens'] / max_tokens) if max_tokens > 0 else 0
+                    
+                    slot['bar'].place(relheight=pct)
+                    slot['day'].config(text=day['day_name'])
+                    tokens_k = day['tokens'] / 1000
+                    slot['val'].config(text=f"{tokens_k:.0f}k" if day['tokens'] > 0 else "0")
+                else:
+                    slot['bar'].place(relheight=0)
+                    slot['day'].config(text="-")
+                    slot['val'].config(text="")
 
-            # 4. Update Project List (Only if counts changed significantly or first run)
-            # For simplicity, we'll redraw projects every time since list is short
-            # Clear old project frame
-            for widget in self._dashboard_refs['proj_container'].winfo_children():
-                widget.destroy()
-                
-            proj_frame = tk.LabelFrame(self._dashboard_refs['proj_container'], text=" 🗂️ Token Usage by Project ",
-                                   bg=self.colors['bg2'], fg=self.colors['text'],
-                                   font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
-            proj_frame.pack(fill='both', expand=True)
-
+            # --- 4. UPDATE PROJECT LIST ---
             projects = self.get_project_summary()
-            if projects:
-                total_proj = sum(p['tokens'] for p in projects)
-                for proj in projects[:5]:
+            total_proj = sum(p['tokens'] for p in projects)
+            
+            for i, slot in enumerate(self._dashboard_refs['proj_slots']):
+                if i < len(projects):
+                    proj = projects[i]
                     pct = (proj['tokens'] / total_proj * 100) if total_proj > 0 else 0
-                    row = tk.Frame(proj_frame, bg=self.colors['bg2'])
-                    row.pack(fill='x', pady=2)
-                    tk.Label(row, text=proj['name'], font=('Segoe UI', 9),
-                            bg=self.colors['bg2'], fg=self.colors['text'], width=25, anchor='w').pack(side='left')
-                    tk.Label(row, text=f"{proj['tokens']:,} ({pct:.0f}%)",
-                            font=('Consolas', 9), bg=self.colors['bg2'], fg=self.colors['blue']).pack(side='right')
-            else:
-                 tk.Label(proj_frame, text="No project data yet",
-                        font=('Segoe UI', 9, 'italic'), bg=self.colors['bg2'], fg=self.colors['muted']).pack()
+                    slot['name'].config(text=proj['name'])
+                    slot['val'].config(text=f"{proj['tokens']:,} ({pct:.0f}%)")
+                    slot['row'].pack(fill='x', pady=2) # Ensure visible
+                else:
+                    slot['name'].config(text="")
+                    slot['val'].config(text="")
+                    slot['row'].pack_forget() # Hide empty rows
+                    
+            # --- 5. UPDATE PROJECT DISTRIBUTION BAR ---
+            dist_bar = self._dashboard_refs['dist_bar']
+            for widget in dist_bar.winfo_children():
+                widget.destroy()
+            
+            colors = [self.colors['blue'], self.colors['green'], self.colors['yellow'], self.colors['red']]
+            running_pct = 0
+            for i, proj in enumerate(projects[:4]): # Top 4 only
+                pct = (proj['tokens'] / total_proj) if total_proj > 0 else 0
+                if pct > 0.05: # Only show if > 5%
+                    col = colors[i % len(colors)]
+                    f = tk.Frame(dist_bar, bg=col)
+                    f.place(relx=running_pct, relwidth=pct, relheight=1)
+                    running_pct += pct
+            
+            # --- 6. UPDATE SYSTEM DIAGNOSTICS ---
+            procs = self.get_antigravity_processes()
+            total_mem = sum(p.get('Mem', 0) for p in procs)
+            limits = self.thresholds
+            
+            # Update Header Labels
+            mem_color = self.colors['green']
+            if total_mem > limits['total_crit']: mem_color = self.colors['red']
+            elif total_mem > limits['total_warn']: mem_color = self.colors['yellow']
+            
+            self._dashboard_refs['ram_label'].config(text=f"RAM Detected: {self.total_ram_mb // 1024} GB | Total Usage: {total_mem}MB", fg=mem_color)
+            self._dashboard_refs['proc_label'].config(text=f"Active Processes: {len(procs)}")
+            
+            # Update Process Bars
+            max_p_mem = max((p.get('Mem', 0) for p in procs), default=500)
+            
+            for i, slot in enumerate(self._dashboard_refs['proc_bars']):
+                if i < len(procs):
+                    p = procs[i]
+                    mem = p.get('Mem', 0)
+                    pct = (mem / max_p_mem) if max_p_mem > 0 else 0
+                    ptype = p.get('Type', 'Unknown')
+                    
+                    p_color = self.colors['blue']
+                    if mem > limits['proc_crit']: p_color = self.colors['red']
+                    elif mem > limits['proc_warn']: p_color = self.colors['yellow']
+
+                    slot['name'].config(text=ptype)
+                    slot['val'].config(text=f"{mem}MB")
+                    slot['bar'].config(bg=p_color)
+                    slot['bar'].place(relwidth=pct)
+                    slot['row'].pack(fill='x', pady=2)
+                else:
+                    slot['row'].pack_forget()
+
+            # --- 7. UPDATE MODEL USAGE ---
+            models_data = analytics.get('models', {})
+            # Sort by usage
+            sorted_models = sorted(models_data.items(), key=lambda x: x[1]['total'], reverse=True)
+            total_model_tokens = sum(m[1]['total'] for m in sorted_models)
+            
+            for i, slot in enumerate(self._dashboard_refs['model_bars']):
+                if i < len(sorted_models):
+                    m_name, m_data = sorted_models[i]
+                    m_tokens = m_data['total']
+                    pct = (m_tokens / total_model_tokens) if total_model_tokens > 0 else 0
+                    
+                    slot['name'].config(text=m_name)
+                    slot['val'].config(text=f"{m_tokens:,} ({pct:.0%})")
+                    slot['bar'].place(relwidth=pct)
+                    slot['row'].pack(fill='x', pady=2)
+                else:
+                    slot['row'].pack_forget()
 
             # Schedule next update (1 second)
             win.after(1000, lambda: self.update_dashboard_stats(win))
@@ -2213,23 +2501,18 @@ Read those logs to understand what we were working on, then continue helping me.
                 font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
         
         # Model presets with context windows
-        models = {
-            "Gemini 3 Pro": 1000000,
-            "Gemini 2.5 Pro": 1000000,
-            "Gemini 2.0 Flash": 1000000,
-            "Claude 3.5 Sonnet": 200000,
-            "Claude 3 Opus": 200000,
-            "GPT-4 Turbo": 128000,
-            "GPT-4o": 128000,
-            "Custom": None
-        }
+        models = self.MODELS
         
-        # Determine current model from context window
-        current_model = "Custom"
-        for name, ctx in models.items():
-            if ctx == self._context_window:
-                current_model = name
-                break
+        # Determine current model from context window if not saved
+        if 'model' not in self.settings:
+             current_model = "Custom"
+             for name, ctx in models.items():
+                 if ctx == self._context_window:
+                     current_model = name
+                     break
+             self.settings['model'] = current_model
+        
+        current_model = self.settings.get('model', 'Custom')
         
         model_var = tk.StringVar(value=current_model)
         
@@ -2408,5 +2691,16 @@ class ToolTip:
             self.tooltip = None
 
 if __name__ == '__main__':
-    app = ContextMonitor()
-    app.run()
+    try:
+        # Redirect stderr to file for debugging pythonw
+        if sys.stderr is None:
+            sys.stderr = open('error.log', 'w')
+            sys.stdout = open('output.log', 'w')
+            
+        app = ContextMonitor()
+        app.run()
+    except Exception as e:
+        import traceback
+        with open("crash_log.txt", "w") as f:
+            f.write(traceback.format_exc())
+        messagebox.showerror("Context Monitor Crash", f"Application crashed:\n{e}")
