@@ -1838,61 +1838,6 @@ Read those logs to understand what we were working on, then continue helping me.
         daily_usage = analytics['daily'].get(today, {}).get('total', 0)
         budget = self._daily_budget
         
-    def show_custom_toast(self, title, message, duration=5):
-        """Show a non-blocking custom toast notification using Tkinter (replaces unstable win10toast)"""
-        try:
-            # 1. Close existing toast if any (Singleton pattern)
-            if hasattr(self, '_current_toast') and self._current_toast:
-                try:
-                    self._current_toast.destroy()
-                except Exception:
-                    pass
-            
-            toast = tk.Toplevel(self.root)
-            self._current_toast = toast  # Track current toast
-            
-            toast.overrideredirect(True)
-            toast.attributes('-topmost', True)
-            toast.attributes('-alpha', 0.95)
-            toast.configure(bg=self.colors['bg'])
-            
-            # Position bottom-right
-            rw = self.root.winfo_screenwidth()
-            rh = self.root.winfo_screenheight()
-            w, h = 350, 100
-            x = rw - w - 20
-            y = rh - h - 60  # Above taskbar
-            toast.geometry(f"{w}x{h}+{x}+{y}")
-            
-            # Main Frame with Border
-            frame = tk.Frame(toast, bg=self.colors['bg'], padx=15, pady=15, 
-                           highlightthickness=1, highlightbackground=self.colors['border'])
-            frame.pack(fill='both', expand=True)
-            
-            # Close Button (X)
-            close_btn = tk.Label(frame, text="×", font=('Arial', 14), 
-                               bg=self.colors['bg'], fg=self.colors['muted'], cursor="hand2")
-            close_btn.place(relx=1.0, rely=0.0, anchor='ne', x=5, y=-5)
-            close_btn.bind('<Button-1>', lambda e: toast.destroy())
-            
-            # Content
-            tk.Label(frame, text=title, font=('Segoe UI', 11, 'bold'), 
-                    bg=self.colors['bg'], fg=self.colors['blue']).pack(anchor='w')
-            tk.Label(frame, text=message, font=('Segoe UI', 10), 
-                    bg=self.colors['bg'], fg=self.colors['text'], justify='left').pack(anchor='w', pady=(5,0))
-            
-            # Auto-close (safely cast duration)
-            if duration and duration > 0:
-                toast.after(int(duration * 1000), toast.destroy)
-            
-            # Click anywhere to close
-            for widget in [toast, frame] + list(frame.children.values()):
-                if widget != close_btn:
-                    widget.bind('<Button-1>', lambda e: toast.destroy())
-                
-        except Exception as e:
-            print(f"Toast error: {e}")
-
     def check_budget_notification(self, analytics, today):
         """Send desktop notification if approaching daily budget"""
         daily_usage = analytics['daily'].get(today, {}).get('total', 0)
@@ -1904,16 +1849,10 @@ Read those logs to understand what we were working on, then continue helping me.
             return
         
         if daily_usage >= budget * 0.9:
-            self.show_custom_toast(
-                "Context Monitor ⚠️",
-                f"Daily budget 90% used! ({daily_usage:,} / {budget:,} tokens)"
-            )
+            print(f"ALERTS: Daily budget 90% used! ({daily_usage:,} / {budget:,} tokens)")
             self._last_notification_time = now
         elif daily_usage >= budget * 0.75:
-            self.show_custom_toast(
-                "Context Monitor 📊",
-                f"Daily budget 75% used ({daily_usage:,} / {budget:,} tokens)"
-            )
+            print(f"ALERTS: Daily budget 75% used ({daily_usage:,} / {budget:,} tokens)")
             self._last_notification_time = now
     
     def check_context_alerts(self, percent, tokens_used):
@@ -1927,17 +1866,10 @@ Read those logs to understand what we were working on, then continue helping me.
         context_window = self._context_window
         
         if percent >= 90:
-            self.show_custom_toast(
-                "Context Critical 🚨",
-                f"Context window 90% full! ({tokens_used:,} / {context_window:,} tokens)\nHandoff IMMINENT.",
-                duration=7
-            )
+            print(f"ALERTS: Context window 90% full! ({tokens_used:,} / {context_window:,} tokens)")
             self._last_context_alert_time = now
         elif percent >= 80:
-            self.show_custom_toast(
-                "Context Warning ⚠️",
-                f"Context window 80% full ({tokens_used:,} / {context_window:,} tokens).\nPrepare for handoff soon."
-            )
+            print(f"ALERTS: Context window 80% full ({tokens_used:,} / {context_window:,} tokens)")
             self._last_context_alert_time = now
 
     def calculate_time_to_handoff(self):
