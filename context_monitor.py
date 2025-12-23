@@ -14,6 +14,7 @@ import os
 import sys
 import atexit
 import ctypes
+from ctypes import wintypes
 import platform
 import threading
 import sys
@@ -105,7 +106,7 @@ class ContextMonitor:
         self._rate_samples = []  # For time-to-handoff calculation
         self._last_notification_time = 0
         self._notifier = ToastNotifier() if HAS_TOAST else None
-        self._daily_budget = self.settings.get('daily_budget', 500000)  # Default 500k tokens/day
+        self._daily_budget = self.settings.get('daily_budget', 1000000)  # Default 1M tokens/day
         self._context_window = self.settings.get('context_window', 1000000)  # Default 1M tokens (Gemini 3 Pro)
         
         # Hardware Scan
@@ -390,62 +391,88 @@ class ContextMonitor:
     def get_sessions(self):
         sessions = []
         try:
-            # Include both uncompressed and compressed sessions
-            for pattern in ['*.pb', '*.pb.gz']:
-                for f in self.conversations_dir.glob(pattern):
-                    if '.tmp' not in f.name:
-                        stat = f.stat()
-                        # Extract session ID (remove .pb or .pb.gz)
-                        session_id = f.stem
-                        if session_id.endswith('.pb'):
-                            session_id = session_id[:-3]
-                        sessions.append({
-                            'id': session_id,
-                            'size': stat.st_size,
-                            'modified': stat.st_mtime,
-                            'estimated_tokens': stat.st_size // 4,
-                            'compressed': pattern == '*.pb.gz'
-                        })
+            # FAST SCAN: Use os.scandir instead of pathlib for better performance
+            # This avoids creating thousands of Path objects and is much faster on Windows
+            if self.conversations_dir.exists():
+                with os.scandir(self.conversations_dir) as entries:
+                    for entry in entries:
+                        name = entry.name
+                        if not entry.is_file():
+                            continue
+                            
+                        # Filter extensions manually
+                        is_pb = name.endswith('.pb')
+                        is_gz = name.endswith('.pb.gz')
+                        if not (is_pb or is_gz):
+                            continue
+                            
+                        if '.tmp' in name:
+                            continue
+                            
+                        try:
+                            # Get stats from the entry directly (cached)
+                            stat = entry.stat()
+                            
+                            # Extract session ID
+                            if is_pb:
+                                session_id = name[:-3]
+                            else:
+                                session_id = name[:-6]  # .pb.gz
+                                
+                            sessions.append({
+                                'id': session_id,
+                                'size': stat.st_size,
+                                'modified': stat.st_mtime,
+                                'estimated_tokens': stat.st_size // 4,
+                                'compressed': is_gz
+                            })
+                        except Exception:
+                            continue
+                            
             sessions.sort(key=lambda x: x['modified'], reverse=True)
         except Exception as e:
             print(f"Error: {e}")
         return sessions
 
     def get_active_vscode_project(self):
-        """Try to get the active project from VS Code window title"""
+        """Get active VS Code project using ctypes (Zero-overhead process check)"""
         try:
-            # Use PowerShell to get the foreground window title (most recently active)
-            cmd = '''powershell -Command "Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public class Win32 {
-    [DllImport(\"user32.dll\")]
-    public static extern IntPtr GetForegroundWindow();
-    [DllImport(\"user32.dll\")]
-    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int count);
-}
-'@
-$h = [Win32]::GetForegroundWindow()
-$sb = New-Object System.Text.StringBuilder 256
-[Win32]::GetWindowText($h, $sb, 256) | Out-Null
-$sb.ToString()
-"'''
-            result = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=3)
-            if result.returncode == 0 and result.stdout.strip():
-                title = result.stdout.strip()
-                # Check if it's a VS Code window
-                if 'Visual Studio Code' in title:
-                    parts = title.split(' - ')
-                    if len(parts) >= 2:
-                        # The second-to-last part before "Visual Studio Code" is usually the project
-                        for part in reversed(parts):
-                            if 'Visual Studio Code' in part:
-                                continue
-                            clean = part.strip()
-                            if clean and not clean.endswith('.py') and not clean.endswith('.js'):
-                                return clean
-        except Exception as e:
-            print(f"[Debug] Active window detection error: {e}")
+            # Use ctypes directly to avoid expensive subprocess/PowerShell calls
+            user32 = ctypes.windll.user32
+            
+            # REMOVED EXPLICIT TYPE DEFINITIONS to avoid global user32 conflicts
+            
+            # Get foreground window handle
+            
+            # Get foreground window handle
+            hwnd = user32.GetForegroundWindow()
+            if not hwnd:
+                return None
+                
+            # Get window title length
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length == 0:
+                return None
+            
+            # Get window title
+            buff = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buff, length + 1)
+            title = buff.value
+            
+            # Check if it's a VS Code window
+            if 'Visual Studio Code' in title:
+                parts = title.split(' - ')
+                if len(parts) >= 2:
+                    # The second-to-last part before "Visual Studio Code" is usually the project
+                    for part in reversed(parts):
+                        if 'Visual Studio Code' in part:
+                            continue
+                        clean = part.strip()
+                        if clean and not clean.endswith('.py') and not clean.endswith('.js'):
+                            return clean
+        except Exception:
+            # Fail silently to avoid log spam/crashes on weird Windows APIs
+            return None
         return None
     
     def get_recently_modified_project(self):
@@ -569,13 +596,24 @@ $sb.ToString()
         self.current_percent = percent
         self.draw_gauge(percent)
         
-        # Save history (throttle: save max once per 5 mins)
-        self.save_history(self.current_session['id'], tokens_used)
-        
         # Track analytics - skip VS Code detection if session was manually selected
+        # MUST run before save_history to capture correct delta (save_history updates self.last_tokens)
         is_manual_session = self.selected_session_id is not None
         project_name = self.get_project_name(self.current_session['id'], skip_vscode=is_manual_session)
         self.save_analytics(tokens_used, project_name)
+        
+        # Save history (throttle: save max once per 5 mins)
+        self.save_history(self.current_session['id'], tokens_used)
+        
+        # Check for context window alerts (handoff warnings)
+        self.check_context_alerts(percent, tokens_used)
+        
+        # DEBUG ALERTS
+        if time.time() % 5 < 0.1: # Print every ~5s
+            ana = self.load_analytics()
+            today = datetime.now().strftime('%Y-%m-%d')
+            tod_total = ana['daily'].get(today, {}).get('total', 0)
+            print(f"[DEBUG] Window%: {percent} | Tokens: {tokens_used} | Budget: {self._daily_budget} | Today: {tod_total}")
         
         if not self.mini_mode:
             self.tokens_label.config(text=f"{tokens_left:,}")
@@ -851,6 +889,24 @@ Read those logs to understand what we were working on, then continue helping me.
             self._history_dirty = False
         except Exception as e:
             print(f"History flush error: {e}")
+
+    def _flush_analytics_cache(self):
+        """Write cached analytics to disk immediately"""
+        if self._analytics_cache is None:
+            return
+            
+        try:
+            self.analytics_file.parent.mkdir(parents=True, exist_ok=True)
+            save_data = {
+                'daily': self._analytics_cache.get('daily', {}),
+                'projects': {k: {'total': v['total']} for k, v in self._analytics_cache.get('projects', {}).items()}
+            }
+            with open(self.analytics_file, 'w') as f:
+                json.dump(save_data, f, indent=2)
+            # Minimal logging on exit
+            # print(f"[Analytics] Flushed to disk: {len(save_data.get('daily', {}))} days")
+        except Exception as e:
+            print(f"Analytics flush error: {e}")
 
     def show_history(self):
         """Show usage history graph with time labels"""
@@ -1752,7 +1808,7 @@ Read those logs to understand what we were working on, then continue helping me.
             
             # Project-level tracking
             if project_name not in analytics['projects']:
-                analytics['projects'][project_name] = {'total': 0, 'sessions': set()}
+                analytics['projects'][project_name] = {'total': 0, 'sessions': []}
             analytics['projects'][project_name]['total'] += delta
         
         self._analytics_cache = analytics
@@ -1782,28 +1838,99 @@ Read those logs to understand what we were working on, then continue helping me.
         daily_usage = analytics['daily'].get(today, {}).get('total', 0)
         budget = self._daily_budget
         
+    def show_custom_toast(self, title, message, duration=5):
+        """Show a non-blocking custom toast notification using Tkinter (replaces unstable win10toast)"""
+        try:
+            toast = tk.Toplevel(self.root)
+            toast.overrideredirect(True)
+            toast.attributes('-topmost', True)
+            toast.attributes('-alpha', 0.95)
+            toast.configure(bg=self.colors['bg'])
+            
+            # Position bottom-right
+            rw = self.root.winfo_screenwidth()
+            rh = self.root.winfo_screenheight()
+            w, h = 350, 100
+            x = rw - w - 20
+            y = rh - h - 60  # Above taskbar
+            toast.geometry(f"{w}x{h}+{x}+{y}")
+            
+            # Main Frame with Border
+            frame = tk.Frame(toast, bg=self.colors['bg'], padx=15, pady=15, 
+                           highlightthickness=1, highlightbackground=self.colors['border'])
+            frame.pack(fill='both', expand=True)
+            
+            # Close Button (X)
+            close_btn = tk.Label(frame, text="×", font=('Arial', 14), 
+                               bg=self.colors['bg'], fg=self.colors['muted'], cursor="hand2")
+            close_btn.place(relx=1.0, rely=0.0, anchor='ne', x=5, y=-5)
+            close_btn.bind('<Button-1>', lambda e: toast.destroy())
+            
+            # Content
+            tk.Label(frame, text=title, font=('Segoe UI', 11, 'bold'), 
+                    bg=self.colors['bg'], fg=self.colors['blue']).pack(anchor='w')
+            tk.Label(frame, text=message, font=('Segoe UI', 10), 
+                    bg=self.colors['bg'], fg=self.colors['text'], justify='left').pack(anchor='w', pady=(5,0))
+            
+            # Auto-close (safely cast duration)
+            if duration and duration > 0:
+                toast.after(int(duration * 1000), toast.destroy)
+            
+            # Click anywhere to close
+            for widget in [toast, frame] + list(frame.children.values()):
+                if widget != close_btn:
+                    widget.bind('<Button-1>', lambda e: toast.destroy())
+                
+        except Exception as e:
+            print(f"Toast error: {e}")
+
+    def check_budget_notification(self, analytics, today):
+        """Send desktop notification if approaching daily budget"""
+        daily_usage = analytics['daily'].get(today, {}).get('total', 0)
+        budget = self._daily_budget
+        
         # Throttle notifications (max once per 5 minutes)
         now = time.time()
         if now - self._last_notification_time < 300:
             return
         
         if daily_usage >= budget * 0.9:
-            self._notifier.show_toast(
+            self.show_custom_toast(
                 "Context Monitor ⚠️",
-                f"Daily budget 90% used! ({daily_usage:,} / {budget:,} tokens)",
-                duration=5,
-                threaded=True
+                f"Daily budget 90% used! ({daily_usage:,} / {budget:,} tokens)"
             )
             self._last_notification_time = now
         elif daily_usage >= budget * 0.75:
-            self._notifier.show_toast(
+            self.show_custom_toast(
                 "Context Monitor 📊",
-                f"Daily budget 75% used ({daily_usage:,} / {budget:,} tokens)",
-                duration=3,
-                threaded=True
+                f"Daily budget 75% used ({daily_usage:,} / {budget:,} tokens)"
             )
             self._last_notification_time = now
     
+    def check_context_alerts(self, percent, tokens_used):
+        """Check for context window usage alerts (handoff warnings)"""
+        now = time.time()
+        
+        # Only alert max once per 5 minutes to avoid spamming
+        if hasattr(self, '_last_context_alert_time') and now - self._last_context_alert_time < 300:
+            return
+            
+        context_window = self._context_window
+        
+        if percent >= 90:
+            self.show_custom_toast(
+                "Context Critical 🚨",
+                f"Context window 90% full! ({tokens_used:,} / {context_window:,} tokens)\nHandoff IMMINENT.",
+                duration=7
+            )
+            self._last_context_alert_time = now
+        elif percent >= 80:
+            self.show_custom_toast(
+                "Context Warning ⚠️",
+                f"Context window 80% full ({tokens_used:,} / {context_window:,} tokens).\nPrepare for handoff soon."
+            )
+            self._last_context_alert_time = now
+
     def calculate_time_to_handoff(self):
         """Estimate time until context limit based on recent token burn rate"""
         if not self.current_session:
@@ -1814,8 +1941,8 @@ Read those logs to understand what we were working on, then continue helping me.
         if len(history) < 3:
             return None
         
-        # Use last 10 samples for rate calculation
-        recent = history[-10:]
+        # Use last 10 minutes (approx 60 samples at 10s interval) for smoother rate
+        recent = history[-60:]
         if len(recent) < 2:
             return None
         
@@ -1889,10 +2016,11 @@ Read those logs to understand what we were working on, then continue helping me.
         return projects[:10]  # Top 10
     
     def show_analytics_dashboard(self):
-        """Show comprehensive analytics dashboard"""
+        """Show comprehensive analytics dashboard with auto-refresh"""
+        # Create window
         win = tk.Toplevel(self.root)
         win.title("Analytics Dashboard")
-        win.geometry("600x500")
+        win.geometry("600x600")
         win.configure(bg=self.colors['bg'])
         win.attributes('-topmost', True)
         win.resizable(True, True)
@@ -1906,106 +2034,176 @@ Read those logs to understand what we were working on, then continue helping me.
         main_frame = tk.Frame(win, bg=self.colors['bg'])
         main_frame.pack(fill='both', expand=True, padx=20, pady=10)
         
-        # ===== TIME TO HANDOFF =====
+        # ===== DYNAMIC CONTENT LABELS =====
+        # We'll store references to labels we need to update
+        self._dashboard_refs = {}
+        
+        # 1. TIME TO HANDOFF
         ttf_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
         ttf_frame.pack(fill='x', pady=(0, 10))
-        
-        seconds_remaining = self.calculate_time_to_handoff()
-        time_str = self.format_time_remaining(seconds_remaining)
         
         tk.Label(ttf_frame, text="⏱️ Estimated Time to Handoff:",
                 font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
         
-        time_color = self.colors['green']
-        if seconds_remaining is not None:
-            if seconds_remaining < 300:  # < 5 mins
-                time_color = self.colors['red']
-            elif seconds_remaining < 900:  # < 15 mins
-                time_color = self.colors['yellow']
-        
-        tk.Label(ttf_frame, text=time_str,
-                font=('Segoe UI', 16, 'bold'), bg=self.colors['bg2'], fg=time_color).pack(side='right')
-        
-        # ===== TODAY'S USAGE =====
+        self._dashboard_refs['ttf_label'] = tk.Label(ttf_frame, text="—",
+                font=('Segoe UI', 16, 'bold'), bg=self.colors['bg2'], fg=self.colors['text'])
+        self._dashboard_refs['ttf_label'].pack(side='right')
+
+        # 2. TODAY'S USAGE
         today_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
         today_frame.pack(fill='x', pady=(0, 10))
-        
-        analytics = self.load_analytics()
-        today = datetime.now().strftime('%Y-%m-%d')
-        today_tokens = analytics['daily'].get(today, {}).get('total', 0)
-        budget = self._daily_budget
-        budget_pct = min(100, (today_tokens / budget) * 100) if budget > 0 else 0
         
         tk.Label(today_frame, text="📅 Today's Usage:",
                 font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(anchor='w')
         
-        # Progress bar
+        # Progress bar container
         bar_frame = tk.Frame(today_frame, bg=self.colors['bg3'], height=20)
         bar_frame.pack(fill='x', pady=5)
         
-        bar_color = self.colors['green']
-        if budget_pct >= 90:
-            bar_color = self.colors['red']
-        elif budget_pct >= 75:
-            bar_color = self.colors['yellow']
+        # Dynamic fill bar
+        self._dashboard_refs['bar_fill'] = tk.Frame(bar_frame, bg=self.colors['green'], height=20)
+        self._dashboard_refs['bar_fill'].place(relwidth=0, relheight=1)
         
-        bar_fill = tk.Frame(bar_frame, bg=bar_color, height=20)
-        bar_fill.place(relwidth=budget_pct/100, relheight=1)
+        # Usage Text
+        self._dashboard_refs['usage_label'] = tk.Label(today_frame, text="Calculating...",
+                font=('Segoe UI', 9), bg=self.colors['bg2'], fg=self.colors['text'])
+        self._dashboard_refs['usage_label'].pack(anchor='w')
         
-        tk.Label(today_frame, text=f"{today_tokens:,} / {budget:,} tokens ({budget_pct:.0f}%)",
-                font=('Segoe UI', 9), bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w')
+        # Reset Countdown (Midnight UTC)
+        # User reported reset aligns with 00:00 UTC
+        now_utc = datetime.utcnow()
+        today_reset = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        self._dashboard_refs['reset_label'] = tk.Label(today_frame, text="",
+                font=('Segoe UI', 8, 'italic'), bg=self.colors['bg2'], fg=self.colors['muted'])
+        self._dashboard_refs['reset_label'].pack(anchor='w', pady=(2,0))
+
+        # 3. WEEKLY CHART & 4. PROJECTS (Re-rendered on update)
+        # We will create container frames for them
+        self._dashboard_refs['week_container'] = tk.Frame(main_frame, bg=self.colors['bg2'])
+        self._dashboard_refs['week_container'].pack(fill='x', pady=(0, 10))
         
-        # ===== WEEKLY CHART =====
-        week_frame = tk.LabelFrame(main_frame, text=" 📈 Last 7 Days ", 
-                                   bg=self.colors['bg2'], fg=self.colors['text'],
-                                   font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
-        week_frame.pack(fill='x', pady=(0, 10))
+        self._dashboard_refs['proj_container'] = tk.Frame(main_frame, bg=self.colors['bg2'])
+        self._dashboard_refs['proj_container'].pack(fill='both', expand=True)
         
-        weekly = self.get_weekly_summary()
-        max_tokens = max(d['tokens'] for d in weekly) if weekly else 1
-        
-        chart_frame = tk.Frame(week_frame, bg=self.colors['bg2'])
-        chart_frame.pack(fill='x')
-        
-        for day in reversed(weekly):  # Most recent on right
-            col = tk.Frame(chart_frame, bg=self.colors['bg2'])
-            col.pack(side='left', expand=True, fill='both', padx=2)
+        # Start update loop
+        self.update_dashboard_stats(win)
+
+    def update_dashboard_stats(self, win):
+        """Update dashboard statistics recursively"""
+        if not win.winfo_exists():
+            return
             
-            # Bar
-            bar_height = int((day['tokens'] / max_tokens) * 60) if max_tokens > 0 else 0
-            bar = tk.Frame(col, bg=self.colors['blue'], width=30, height=max(2, bar_height))
-            bar.pack(side='bottom')
+        try:
+            # 1. Update Time to Handoff
+            seconds_remaining = self.calculate_time_to_handoff()
+            time_str = self.format_time_remaining(seconds_remaining)
             
-            # Day label
-            tk.Label(col, text=day['day_name'], font=('Segoe UI', 8),
-                    bg=self.colors['bg2'], fg=self.colors['muted']).pack(side='bottom')
+            time_color = self.colors['green']
+            if seconds_remaining is not None:
+                if seconds_remaining < 300: time_color = self.colors['red']
+                elif seconds_remaining < 900: time_color = self.colors['yellow']
             
-            # Token count
-            tokens_k = day['tokens'] / 1000
-            tk.Label(col, text=f"{tokens_k:.0f}k" if day['tokens'] > 0 else "0",
-                    font=('Consolas', 7), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='bottom')
-        
-        # ===== PROJECT BREAKDOWN =====
-        proj_frame = tk.LabelFrame(main_frame, text=" 🗂️ Token Usage by Project ",
-                                   bg=self.colors['bg2'], fg=self.colors['text'],
-                                   font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
-        proj_frame.pack(fill='both', expand=True)
-        
-        projects = self.get_project_summary()
-        if projects:
-            total_proj = sum(p['tokens'] for p in projects)
-            for proj in projects[:5]:  # Top 5
-                pct = (proj['tokens'] / total_proj * 100) if total_proj > 0 else 0
-                row = tk.Frame(proj_frame, bg=self.colors['bg2'])
-                row.pack(fill='x', pady=2)
+            self._dashboard_refs['ttf_label'].config(text=time_str, fg=time_color)
+            
+            # 2. Update Today's Usage
+            analytics = self.load_analytics()
+            today = datetime.now().strftime('%Y-%m-%d')
+            today_tokens = analytics['daily'].get(today, {}).get('total', 0)
+            budget = self._daily_budget
+            budget_pct = min(100, (today_tokens / budget) * 100) if budget > 0 else 0
+            
+            # Bar color
+            bar_color = self.colors['green']
+            if budget_pct >= 90: bar_color = self.colors['red']
+            elif budget_pct >= 75: bar_color = self.colors['yellow']
+            
+            self._dashboard_refs['bar_fill'].configure(bg=bar_color)
+            self._dashboard_refs['bar_fill'].place(relwidth=budget_pct/100, relheight=1)
+            
+            self._dashboard_refs['usage_label'].config(
+                text=f"{today_tokens:,} / {budget:,} tokens ({budget_pct:.0f}%)"
+            )
+            
+            # Reset Countdown (Midnight UTC)
+            # User reported reset aligns with 00:00 UTC
+            now_utc = datetime.utcnow()
+            today_reset = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+            if now_utc >= today_reset:
+                next_reset = today_reset + timedelta(days=1)
+            else:
+                next_reset = today_reset
+            
+            time_until = next_reset - now_utc
+            h, r = divmod(time_until.seconds, 3600)
+            m = r // 60
+            self._dashboard_refs['reset_label'].config(text=f"🔄 Daily Stats Reset in: {h}h {m}m (Midnight UTC)")
+
+            self._dashboard_refs['reset_label'].config(text=f"🔄 Daily Stats Reset in: {h}h {m}m (Midnight PT)")
+
+            # 3. WEEKLY CHART (Re-render)
+            for widget in self._dashboard_refs['week_container'].winfo_children():
+                widget.destroy()
+            
+            week_frame_inner = tk.LabelFrame(self._dashboard_refs['week_container'], text=" 📈 Last 7 Days ", 
+                                       bg=self.colors['bg2'], fg=self.colors['text'],
+                                       font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
+            week_frame_inner.pack(fill='x')
+            
+            weekly = self.get_weekly_summary()
+            max_tokens = max(d['tokens'] for d in weekly) if weekly else 1
+            
+            chart_frame = tk.Frame(week_frame_inner, bg=self.colors['bg2'])
+            chart_frame.pack(fill='x')
+            
+            for day in reversed(weekly):  # Most recent on right
+                col = tk.Frame(chart_frame, bg=self.colors['bg2'])
+                col.pack(side='left', expand=True, fill='both', padx=2)
                 
-                tk.Label(row, text=proj['name'], font=('Segoe UI', 9),
-                        bg=self.colors['bg2'], fg=self.colors['text'], width=25, anchor='w').pack(side='left')
-                tk.Label(row, text=f"{proj['tokens']:,} ({pct:.0f}%)",
-                        font=('Consolas', 9), bg=self.colors['bg2'], fg=self.colors['blue']).pack(side='right')
-        else:
-            tk.Label(proj_frame, text="No project data yet",
-                    font=('Segoe UI', 9, 'italic'), bg=self.colors['bg2'], fg=self.colors['muted']).pack()
+                # Bar
+                bar_height = int((day['tokens'] / max_tokens) * 60) if max_tokens > 0 else 0
+                bar = tk.Frame(col, bg=self.colors['blue'], width=30, height=max(2, bar_height))
+                bar.pack(side='bottom')
+                
+                # Day label
+                tk.Label(col, text=day['day_name'], font=('Segoe UI', 8),
+                        bg=self.colors['bg2'], fg=self.colors['muted']).pack(side='bottom')
+                
+                # Token count
+                tokens_k = day['tokens'] / 1000
+                tk.Label(col, text=f"{tokens_k:.0f}k" if day['tokens'] > 0 else "0",
+                        font=('Consolas', 7), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='bottom')
+
+            # 4. Update Project List (Only if counts changed significantly or first run)
+            # For simplicity, we'll redraw projects every time since list is short
+            # Clear old project frame
+            for widget in self._dashboard_refs['proj_container'].winfo_children():
+                widget.destroy()
+                
+            proj_frame = tk.LabelFrame(self._dashboard_refs['proj_container'], text=" 🗂️ Token Usage by Project ",
+                                   bg=self.colors['bg2'], fg=self.colors['text'],
+                                   font=('Segoe UI', 10, 'bold'), padx=10, pady=10)
+            proj_frame.pack(fill='both', expand=True)
+
+            projects = self.get_project_summary()
+            if projects:
+                total_proj = sum(p['tokens'] for p in projects)
+                for proj in projects[:5]:
+                    pct = (proj['tokens'] / total_proj * 100) if total_proj > 0 else 0
+                    row = tk.Frame(proj_frame, bg=self.colors['bg2'])
+                    row.pack(fill='x', pady=2)
+                    tk.Label(row, text=proj['name'], font=('Segoe UI', 9),
+                            bg=self.colors['bg2'], fg=self.colors['text'], width=25, anchor='w').pack(side='left')
+                    tk.Label(row, text=f"{proj['tokens']:,} ({pct:.0f}%)",
+                            font=('Consolas', 9), bg=self.colors['bg2'], fg=self.colors['blue']).pack(side='right')
+            else:
+                 tk.Label(proj_frame, text="No project data yet",
+                        font=('Segoe UI', 9, 'italic'), bg=self.colors['bg2'], fg=self.colors['muted']).pack()
+
+            # Schedule next update (1 second)
+            win.after(1000, lambda: self.update_dashboard_stats(win))
+            
+        except Exception as e:
+            print(f"Dashboard update error: {e}")
         
         # ===== BUDGET SETTING =====
         budget_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
@@ -2201,6 +2399,7 @@ Read those logs to understand what we were working on, then continue helping me.
         finally:
             # Force cleanup and exit
             self._flush_history_cache()  # Save any pending history
+            self._flush_analytics_cache()  # Save any pending analytics
             self._cleanup_processes()
             # Use os._exit to ensure all threads are terminated
             os._exit(0)
