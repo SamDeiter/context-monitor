@@ -1354,7 +1354,7 @@ Read those logs to understand what we were working on, then continue helping me.
     def switch_tab(self, tab_id):
         """Switch active tab in Full mode"""
         self.active_tab = tab_id
-        self.setup_ui()  # Rebuild UI with new active tab
+        self.render_tab_content()  # Just re-render content, don't rebuild entire UI
     
     def render_tab_content(self):
         """Render content for the active tab"""
