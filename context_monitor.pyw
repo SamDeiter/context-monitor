@@ -1372,7 +1372,6 @@ Read those logs to understand what we were working on, then continue helping me.
             self.render_token_stats_inline()
         elif self.active_tab == 'history':
             self.render_history_inline()
-```
         elif self.active_tab == 'analytics':
             self.render_analytics_inline()
     
