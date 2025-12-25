@@ -964,6 +964,28 @@ Read those logs to understand what we were working on, then continue helping me.
             y = max(0, min(y, screen_h - 100))
             self.root.geometry(f"+{x}+{y}")
     
+    def reload_ui(self):
+        """Reload UI without restarting app (for development)"""
+        try:
+            # Save current state
+            current_mode = self.mini_mode
+            current_session = self.selected_session_id
+            
+            # Rebuild UI
+            self.setup_ui()
+            
+            # Restore state
+            self.mini_mode = current_mode
+            if current_session:
+                self.selected_session_id = current_session
+            
+            # Reload data
+            self.load_session()
+            
+            print("[Reload] UI reloaded successfully")
+        except Exception as e:
+            print(f"[Reload] Error: {e}")
+    
     def toggle_mini_mode(self):
         """Toggle between full and mini mode"""
         self.mini_mode = not self.mini_mode
@@ -1405,6 +1427,8 @@ Read those logs to understand what we were working on, then continue helping me.
         
         menu.add_cascade(label="  ⏱️  Refresh Speed", menu=speed_menu)
         
+        menu.add_separator()
+        menu.add_command(label="  🔄  Reload UI (Dev)", command=self.reload_ui)
         menu.add_separator()
         menu.add_command(label="  ✕  Exit", command=self.cleanup_and_exit)
         
