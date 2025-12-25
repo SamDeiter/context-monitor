@@ -292,7 +292,7 @@ class ContextMonitor:
         x_pos = pos[1] if len(pos) > 1 else "50"
         y_pos = pos[2] if len(pos) > 2 else "50"
         
-        if self.mini_mode:
+        if self.display_mode == 'mini':
             # Mini mode: circular gauge - reduced size, tighter fit
             self.root.geometry(f"120x120+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
@@ -319,8 +319,8 @@ class ContextMonitor:
             self.gauge_canvas.bind('<Button-1>', self.start_drag)
             self.gauge_canvas.bind('<B1-Motion>', self.drag)
             
-        else:
-            # Full mode - reset transparency
+        elif self.display_mode == 'compact':
+            # Compact mode (current "full" mode) - reset transparency
             self.root.attributes('-transparentcolor', '')
             self.root.geometry(f"320x220+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
@@ -454,6 +454,117 @@ class ContextMonitor:
             self.create_tooltip(self.session_label, "Current Project\nAuto-detected from VS Code/GitHub")
             self.create_tooltip(mini_btn, "Toggle Mini Mode (M)\nSwitch to compact view")
             self.create_tooltip(alpha_frame, "Transparency (+/-)\nAdjust window opacity")
+        
+        else:  # full mode
+            # Full mode - larger window with embedded analytics
+            self.root.attributes('-transparentcolor', '')
+            self.root.geometry(f"600x450+{x_pos}+{y_pos}")
+            self.root.update()
+            
+            # Reuse compact mode header and content (copy from above)
+            # Header
+            header = tk.Frame(self.root, bg=self.colors['bg3'], height=30)
+            header.pack(fill='x')
+            header.pack_propagate(False)
+            
+            title = tk.Label(header, text="📊 Context Monitor - Full", font=('Segoe UI', 10, 'bold'),
+                            bg=self.colors['bg3'], fg=self.colors['text'])
+            title.pack(side='left', padx=10, pady=5)
+            
+            # Close button
+            close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
+                                bg=self.colors['bg3'], fg=self.colors['text2'], cursor='hand2')
+            close_btn.pack(side='right', padx=8)
+            close_action = self.minimize_to_tray if HAS_TRAY else self.cleanup_and_exit
+            close_btn.bind('<Button-1>', lambda e: close_action())
+            
+            # Mode toggle
+            mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
+                               bg=self.colors['bg3'], fg=self.colors['blue'])
+            mini_btn.pack(side='right', padx=5)
+            mini_btn.bind('<Button-1>', lambda e: self.toggle_mini_mode())
+            
+            # Transparency controls
+            alpha_frame = tk.Frame(header, bg=self.colors['bg3'])
+            alpha_frame.pack(side='right', padx=5)
+            
+            tk.Label(alpha_frame, text="−", font=('Segoe UI', 10), cursor='hand2',
+                    bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
+            alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(-0.05))
+            
+            tk.Label(alpha_frame, text="+", font=('Segoe UI', 10), cursor='hand2',
+                    bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
+            alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(0.05))
+            
+            for w in [header, title]:
+                w.bind('<Button-1>', self.start_drag)
+                w.bind('<B1-Motion>', self.drag)
+                w.bind('<Button-3>', self.show_context_menu)
+            
+            # Main content area
+            main_content = tk.Frame(self.root, bg=self.colors['bg2'])
+            main_content.pack(fill='both', expand=True)
+            
+            # Top section: Gauge + Info (compact mode style)
+            top_section = tk.Frame(main_content, bg=self.colors['bg2'], padx=15, pady=12)
+            top_section.pack(fill='x')
+            
+            # Gauge
+            self.gauge_canvas = tk.Canvas(top_section, width=90, height=90,
+                                          bg=self.colors['bg2'], highlightthickness=0)
+            self.gauge_canvas.pack(side='left', padx=(0, 12))
+            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
+            self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
+            self.draw_gauge(self.current_percent)
+            
+            # Info panel (simplified from compact mode)
+            info = tk.Frame(top_section, bg=self.colors['bg2'])
+            info.pack(side='left', fill='both', expand=True)
+            
+            tk.Label(info, text="TOKENS LEFT", font=('Segoe UI', 8),
+                    bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
+            
+            self.tokens_label = tk.Label(info, text="Loading...", font=('Segoe UI', 16, 'bold'),
+                                        bg=self.colors['bg2'], fg=self.colors['text'])
+            self.tokens_label.pack(anchor='w')
+            
+            self.delta_label = tk.Label(info, text="", font=('Segoe UI', 9),
+                                       bg=self.colors['bg2'], fg=self.colors['blue'])
+            self.delta_label.pack(anchor='w')
+            
+            self.project_label = tk.Label(info, text="", font=('Segoe UI', 9),
+                                         bg=self.colors['bg2'], fg=self.colors['muted'])
+            self.project_label.pack(anchor='w', pady=(4, 0))
+            
+            # Graph section (NEW for full mode)
+            graph_section = tk.Frame(main_content, bg=self.colors['bg'], padx=15, pady=10)
+            graph_section.pack(fill='both', expand=True)
+            
+            tk.Label(graph_section, text="📈 Usage History (Last 24h)", font=('Segoe UI', 9, 'bold'),
+                    bg=self.colors['bg'], fg=self.colors['text']).pack(anchor='w', pady=(0, 5))
+            
+            # Graph canvas
+            self.graph_canvas = tk.Canvas(graph_section, width=560, height=150,
+                                         bg=self.colors['bg2'], highlightthickness=1,
+                                         highlightbackground=self.colors['bg3'])
+            self.graph_canvas.pack(fill='both', expand=True)
+            
+            # Draw mini graph (will implement draw_mini_graph next)
+            try:
+                self.draw_mini_graph()
+            except:
+                # Fallback if draw_mini_graph not implemented yet
+                self.graph_canvas.create_text(280, 75, text="Graph loading...",
+                                             fill=self.colors['muted'], font=('Segoe UI', 10))
+            
+            # Status bar
+            status = tk.Frame(self.root, bg=self.colors['bg3'], height=28)
+            status.pack(fill='x', side='bottom')
+            status.pack_propagate(False)
+            
+            self.status_label = tk.Label(status, text="✓ Ready", font=('Segoe UI', 8),
+                                        bg=self.colors['bg3'], fg=self.colors['green'], anchor='w')
+            self.status_label.pack(side='left', padx=10, fill='x', expand=True)
         
         # Keyboard shortcuts (global)
         self.root.bind('<KeyPress-m>', lambda e: self.toggle_mini_mode())
