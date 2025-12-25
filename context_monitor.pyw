@@ -280,6 +280,17 @@ class ContextMonitor:
             }
 
         
+    def create_button(self, parent, text, command):
+        """Create a styled button for Full mode"""
+        btn = tk.Label(parent, text=text, font=('Segoe UI', 8),
+                      bg=self.colors['bg3'], fg=self.colors['text'],
+                      cursor='hand2', padx=8, pady=4,
+                      relief='flat', borderwidth=1)
+        btn.bind('<Button-1>', lambda e: command())
+        btn.bind('<Enter>', lambda e: btn.config(bg=self.colors['blue'], fg='white'))
+        btn.bind('<Leave>', lambda e: btn.config(bg=self.colors['bg3'], fg=self.colors['text']))
+        return btn
+    
     def setup_ui(self):
         # Clear existing widgets
         for widget in self.root.winfo_children():
@@ -549,13 +560,30 @@ class ContextMonitor:
                                          highlightbackground=self.colors['bg3'])
             self.graph_canvas.pack(fill='both', expand=True)
             
-            # Draw mini graph (will implement draw_mini_graph next)
-            try:
-                self.draw_mini_graph()
-            except:
-                # Fallback if draw_mini_graph not implemented yet
-                self.graph_canvas.create_text(280, 75, text="Graph loading...",
-                                             fill=self.colors['muted'], font=('Segoe UI', 10))
+            # Draw mini graph after widget is ready
+            self.root.after(100, lambda: self.draw_mini_graph() if hasattr(self, 'graph_canvas') else None)
+            
+            # Action buttons panel
+            buttons_frame = tk.Frame(main_content, bg=self.colors['bg2'], padx=15, pady=10)
+            buttons_frame.pack(fill='x')
+            
+            # Row 1: Diagnostics
+            row1 = tk.Frame(buttons_frame, bg=self.colors['bg2'])
+            row1.pack(fill='x', pady=(0, 5))
+            
+            self.create_button(row1, "📊 Diagnostics", self.show_diagnostics).pack(side='left', padx=2)
+            self.create_button(row1, "📈 Token Stats", self.show_advanced_stats).pack(side='left', padx=2)
+            self.create_button(row1, "📅 History", self.show_history).pack(side='left', padx=2)
+            self.create_button(row1, "📊 Analytics", self.show_analytics_dashboard).pack(side='left', padx=2)
+            
+            # Row 2: Actions
+            row2 = tk.Frame(buttons_frame, bg=self.colors['bg2'])
+            row2.pack(fill='x')
+            
+            self.create_button(row2, "💾 Export CSV", self.export_history_csv).pack(side='left', padx=2)
+            self.create_button(row2, "🧹 Clean Old", self.cleanup_old_conversations).pack(side='left', padx=2)
+            self.create_button(row2, "📦 Archive", self.archive_old_sessions).pack(side='left', padx=2)
+            self.create_button(row2, "🔄 Restart", self.restart_antigravity).pack(side='left', padx=2)
             
             # Status bar
             status = tk.Frame(self.root, bg=self.colors['bg3'], height=28)
