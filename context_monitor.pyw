@@ -1491,13 +1491,8 @@ Read those logs to understand what we were working on, then continue helping me.
         tk.Label(container, text="Today's Usage:", font=('Segoe UI', 9, 'bold'),
                 bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w', pady=(5, 5))
         
-        total_today = today_data.get('total_tokens', 0)
+        total_today = today_data.get('total', 0)
         tk.Label(container, text=f"  • Total Tokens: {total_today:,}",
-                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w')
-        
-        # Session count
-        sessions_today = today_data.get('session_count', 0)
-        tk.Label(container, text=f"  • Sessions: {sessions_today}",
                 font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w')
         
         # Weekly summary
@@ -1508,7 +1503,7 @@ Read those logs to understand what we were working on, then continue helping me.
         for i in range(7):
             date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
             day_data = analytics.get('daily', {}).get(date, {})
-            week_total += day_data.get('total_tokens', 0)
+            week_total += day_data.get('total', 0)
         
         tk.Label(container, text=f"  • Total Tokens: {week_total:,}",
                 font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w')
