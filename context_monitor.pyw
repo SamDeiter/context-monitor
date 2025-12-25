@@ -1307,18 +1307,43 @@ Read those logs to understand what we were working on, then continue helping me.
                               activeforeground='white')
         
         current_id = self.current_session['id'] if self.current_session else None
-        
-        # Get sessions and group by project
-        sessions = self.get_sessions()[:15]  # Get more sessions to find multiple projects
+    
+        # PERFORMANCE: Use lightweight session list (no protobuf parsing)
+        # Only parse protobuf for the current session, not all sessions in menu
         from functools import partial
         from collections import OrderedDict
         
-        # Group sessions by project name (skip PowerShell for non-current sessions)
+        # Get lightweight session list (file stats only, no token extraction)
+        sessions = []
+        try:
+            if self.conversations_dir.exists():
+                import os
+                with os.scandir(self.conversations_dir) as entries:
+                    for entry in entries:
+                        if not entry.is_file() or '.tmp' in entry.name:
+                            continue
+                        if entry.name.endswith('.pb') or entry.name.endswith('.pb.gz'):
+                            stat = entry.stat()
+                            session_id = entry.name[:-3] if entry.name.endswith('.pb') else entry.name[:-6]
+                            sessions.append({
+                                'id': session_id,
+                                'modified': stat.st_mtime
+                            })
+                sessions.sort(key=lambda x: x['modified'], reverse=True)
+                sessions = sessions[:15]  # Top 15 most recent
+        except Exception:
+            sessions = []
+        
+        # Group sessions by project name (use cached names, skip expensive detection)
         projects = OrderedDict()
         for s in sessions:
-            # Only use full detection for current session, skip PowerShell for others
-            skip_ps = s['id'] != current_id
-            name = self.get_project_name(s['id'], skip_vscode=skip_ps)
+            # Use cached project name if available, otherwise use session ID
+            if s['id'] in self.project_name_cache:
+                name = self.project_name_cache[s['id']]
+            else:
+                # Fallback to truncated ID (don't do expensive detection in menu)
+                name = s['id'][:16] + "..."
+            
             if name not in projects:
                 projects[name] = []
             projects[name].append(s)
