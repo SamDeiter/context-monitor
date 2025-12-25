@@ -949,6 +949,9 @@ class ContextMonitor:
             
             # Use project name from file if session was manually selected
             display_name = self.get_project_name(self.current_session['id'], skip_vscode=is_manual_session)
+        
+        # Update UI labels if they exist
+        if hasattr(self, 'session_label'):
             self.session_label.config(text=display_name)
             
             # Update tray icon
