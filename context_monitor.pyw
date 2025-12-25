@@ -1363,21 +1363,43 @@ Read those logs to understand what we were working on, then continue helping me.
             sessions = []
         
         
-        # Simple list showing project name for each session
-        for i, s in enumerate(sessions[:10]):  # Show top 10 most recent
-            check = "✓ " if s['id'] == current_id else "  "
-            
+        # Group sessions by project name
+        projects = OrderedDict()
+        for s in sessions:
             # Get project name (use cache or detect)
             if s['id'] in self.project_name_cache:
                 project_name = self.project_name_cache[s['id']]
             else:
                 # Quick detection for menu (skip expensive PowerShell)
                 project_name = self.get_project_name(s['id'], skip_vscode=True)
-                
-            short_id = s['id'][:8]
-            label = f"{check}{project_name} ({short_id}...)"
-            sessions_menu.add_command(label=label, 
-                                    command=lambda sid=s['id']: self.switch_session(sid))
+            
+            if project_name not in projects:
+                projects[project_name] = []
+            projects[project_name].append(s)
+        
+        # Show sessions grouped by project
+        shown = 0
+        for project_name, proj_sessions in projects.items():
+            if shown >= 10:
+                break
+            
+            # Add project header
+            sessions_menu.add_command(label=f"── {project_name} ──", state='disabled')
+            
+            # Add sessions under this project
+            for s in proj_sessions[:3]:  # Max 3 per project
+                if shown >= 10:
+                    break
+                check = "✓ " if s['id'] == current_id else "  "
+                short_id = s['id'][:8]
+                label = f"{check}{project_name} ({short_id}...)"
+                sessions_menu.add_command(label=label, 
+                                        command=lambda sid=s['id']: self.switch_session(sid))
+                shown += 1
+            
+            # Separator between projects
+            if shown < 10 and project_name != list(projects.keys())[-1]:
+                sessions_menu.add_separator()
             
         menu.add_cascade(label="  🔀  Switch Session", menu=sessions_menu)
         menu.add_separator()
