@@ -467,18 +467,21 @@ class ContextMonitor:
             self.create_tooltip(alpha_frame, "Transparency (+/-)\nAdjust window opacity")
         
         else:  # full mode
-            # Full mode - larger window with embedded analytics
+            # Full mode - larger window with tabbed analytics
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"600x450+{x_pos}+{y_pos}")
+            self.root.geometry(f"650x650+{x_pos}+{y_pos}")
             self.root.update()
             
-            # Reuse compact mode header and content (copy from above)
+            # Initialize tab state
+            if not hasattr(self, 'active_tab'):
+                self.active_tab = 'history'
+            
             # Header
             header = tk.Frame(self.root, bg=self.colors['bg3'], height=30)
             header.pack(fill='x')
             header.pack_propagate(False)
             
-            title = tk.Label(header, text="📊 Context Monitor - Full", font=('Segoe UI', 10, 'bold'),
+            title = tk.Label(header, text="📊 Context Monitor", font=('Segoe UI', 10, 'bold'),
                             bg=self.colors['bg3'], fg=self.colors['text'])
             title.pack(side='left', padx=10, pady=5)
             
@@ -512,30 +515,26 @@ class ContextMonitor:
                 w.bind('<B1-Motion>', self.drag)
                 w.bind('<Button-3>', self.show_context_menu)
             
-            # Main content area
-            main_content = tk.Frame(self.root, bg=self.colors['bg2'])
-            main_content.pack(fill='both', expand=True)
+            # Top info bar (gauge + tokens)
+            top_bar = tk.Frame(self.root, bg=self.colors['bg2'], padx=15, pady=10)
+            top_bar.pack(fill='x')
             
-            # Top section: Gauge + Info (compact mode style)
-            top_section = tk.Frame(main_content, bg=self.colors['bg2'], padx=15, pady=12)
-            top_section.pack(fill='x')
-            
-            # Gauge
-            self.gauge_canvas = tk.Canvas(top_section, width=90, height=90,
+            # Gauge (smaller)
+            self.gauge_canvas = tk.Canvas(top_bar, width=70, height=70,
                                           bg=self.colors['bg2'], highlightthickness=0)
             self.gauge_canvas.pack(side='left', padx=(0, 12))
             self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
             self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
             self.draw_gauge(self.current_percent)
             
-            # Info panel (simplified from compact mode)
-            info = tk.Frame(top_section, bg=self.colors['bg2'])
+            # Info
+            info = tk.Frame(top_bar, bg=self.colors['bg2'])
             info.pack(side='left', fill='both', expand=True)
             
             tk.Label(info, text="TOKENS LEFT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
             
-            self.tokens_label = tk.Label(info, text="Loading...", font=('Segoe UI', 16, 'bold'),
+            self.tokens_label = tk.Label(info, text="Loading...", font=('Segoe UI', 14, 'bold'),
                                         bg=self.colors['bg2'], fg=self.colors['text'])
             self.tokens_label.pack(anchor='w')
             
@@ -545,48 +544,49 @@ class ContextMonitor:
             
             self.project_label = tk.Label(info, text="", font=('Segoe UI', 9),
                                          bg=self.colors['bg2'], fg=self.colors['muted'])
-            self.project_label.pack(anchor='w', pady=(4, 0))
+            self.project_label.pack(anchor='w', pady=(2, 0))
             
-            # Graph section (NEW for full mode)
-            graph_section = tk.Frame(main_content, bg=self.colors['bg'], padx=15, pady=10)
-            graph_section.pack(fill='both', expand=True)
+            # Tab bar
+            tab_bar = tk.Frame(self.root, bg=self.colors['bg3'], height=35)
+            tab_bar.pack(fill='x')
+            tab_bar.pack_propagate(False)
             
-            tk.Label(graph_section, text="📈 Usage History (Last 24h)", font=('Segoe UI', 9, 'bold'),
-                    bg=self.colors['bg'], fg=self.colors['text']).pack(anchor='w', pady=(0, 5))
+            tabs = [
+                ('📊 Diagnostics', 'diagnostics'),
+                ('📈 Token Stats', 'token_stats'),
+                ('📅 History', 'history'),
+                ('📊 Analytics', 'analytics')
+            ]
             
-            # Graph canvas
-            self.graph_canvas = tk.Canvas(graph_section, width=560, height=150,
-                                         bg=self.colors['bg2'], highlightthickness=1,
-                                         highlightbackground=self.colors['bg3'])
-            self.graph_canvas.pack(fill='both', expand=True)
+            for label, tab_id in tabs:
+                tab_btn = tk.Label(tab_bar, text=label, font=('Segoe UI', 9),
+                                  bg=self.colors['bg3'], fg=self.colors['text'],
+                                  cursor='hand2', padx=15, pady=8)
+                tab_btn.pack(side='left')
+                tab_btn.bind('<Button-1>', lambda e, t=tab_id: self.switch_tab(t))
+                
+                # Highlight active tab
+                if tab_id == self.active_tab:
+                    tab_btn.config(bg=self.colors['blue'], fg='white')
             
-            # Draw mini graph after widget is ready
-            self.root.after(100, lambda: self.draw_mini_graph() if hasattr(self, 'graph_canvas') else None)
+            # Content area (scrollable)
+            self.content_frame = tk.Frame(self.root, bg=self.colors['bg2'])
+            self.content_frame.pack(fill='both', expand=True)
             
-            # Action buttons panel
-            buttons_frame = tk.Frame(main_content, bg=self.colors['bg2'], padx=15, pady=10)
-            buttons_frame.pack(fill='x')
+            # Render active tab content
+            self.root.after(100, self.render_tab_content)
             
-            # Row 1: Diagnostics
-            row1 = tk.Frame(buttons_frame, bg=self.colors['bg2'])
-            row1.pack(fill='x', pady=(0, 5))
+            # Action buttons at bottom
+            actions_bar = tk.Frame(self.root, bg=self.colors['bg3'], padx=10, pady=8)
+            actions_bar.pack(fill='x')
             
-            self.create_button(row1, "📊 Diagnostics", self.show_diagnostics).pack(side='left', padx=2)
-            self.create_button(row1, "📈 Token Stats", self.show_advanced_stats).pack(side='left', padx=2)
-            self.create_button(row1, "📅 History", self.show_history).pack(side='left', padx=2)
-            self.create_button(row1, "📊 Analytics", self.show_analytics_dashboard).pack(side='left', padx=2)
-            
-            # Row 2: Actions
-            row2 = tk.Frame(buttons_frame, bg=self.colors['bg2'])
-            row2.pack(fill='x')
-            
-            self.create_button(row2, "💾 Export CSV", self.export_history_csv).pack(side='left', padx=2)
-            self.create_button(row2, "🧹 Clean Old", self.cleanup_old_conversations).pack(side='left', padx=2)
-            self.create_button(row2, "📦 Archive", self.archive_old_sessions).pack(side='left', padx=2)
-            self.create_button(row2, "🔄 Restart", self.restart_antigravity).pack(side='left', padx=2)
+            self.create_button(actions_bar, "💾 Export CSV", self.export_history_csv).pack(side='left', padx=2)
+            self.create_button(actions_bar, "🧹 Clean Old", self.cleanup_old_conversations).pack(side='left', padx=2)
+            self.create_button(actions_bar, "📦 Archive", self.archive_old_sessions).pack(side='left', padx=2)
+            self.create_button(actions_bar, "🔄 Restart", self.restart_antigravity).pack(side='left', padx=2)
             
             # Status bar
-            status = tk.Frame(self.root, bg=self.colors['bg3'], height=28)
+            status = tk.Frame(self.root, bg=self.colors['bg3'], height=24)
             status.pack(fill='x', side='bottom')
             status.pack_propagate(False)
             
@@ -1350,6 +1350,77 @@ Read those logs to understand what we were working on, then continue helping me.
                 color = self.colors['yellow']
             canvas.create_oval(last_x-4, last_y-4, last_x+4, last_y+4,
                               fill=color, outline='white', width=2)
+    
+    def switch_tab(self, tab_id):
+        """Switch active tab in Full mode"""
+        self.active_tab = tab_id
+        self.setup_ui()  # Rebuild UI with new active tab
+    
+    def render_tab_content(self):
+        """Render content for the active tab"""
+        if not hasattr(self, 'content_frame'):
+            return
+        
+        # Clear existing content
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        # Render based on active tab
+        if self.active_tab == 'diagnostics':
+            self.render_diagnostics_inline()
+        elif self.active_tab == 'token_stats':
+            self.render_token_stats_inline()
+        elif self.active_tab == 'history':
+            self.render_history_inline()
+        elif self.active_tab == 'analytics':
+            self.render_analytics_inline()
+    
+    def render_history_inline(self):
+        """Render usage history graph inline"""
+        canvas = tk.Canvas(self.content_frame, width=620, height=400,
+                          bg=self.colors['bg2'], highlightthickness=1,
+                          highlightbackground=self.colors['bg3'])
+        canvas.pack(padx=15, pady=15, fill='both', expand=True)
+        
+        # Reuse draw_mini_graph logic but with larger canvas
+        self.graph_canvas = canvas
+        self.root.after(100, self.draw_mini_graph)
+    
+    def render_diagnostics_inline(self):
+        """Render system diagnostics inline"""
+        container = tk.Frame(self.content_frame, bg=self.colors['bg2'], padx=15, pady=15)
+        container.pack(fill='both', expand=True)
+        
+        tk.Label(container, text="System Diagnostics", font=('Segoe UI', 12, 'bold'),
+                bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w', pady=(0, 10))
+        
+        # Placeholder - will add actual diagnostics
+        tk.Label(container, text="System health information will appear here",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['muted']).pack()
+    
+    def render_token_stats_inline(self):
+        """Render token statistics inline"""
+        container = tk.Frame(self.content_frame, bg=self.colors['bg2'], padx=15, pady=15)
+        container.pack(fill='both', expand=True)
+        
+        tk.Label(container, text="Token Statistics", font=('Segoe UI', 12, 'bold'),
+                bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w', pady=(0, 10))
+        
+        # Placeholder - will add actual stats
+        tk.Label(container, text="Detailed token breakdown will appear here",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['muted']).pack()
+    
+    def render_analytics_inline(self):
+        """Render analytics dashboard inline"""
+        container = tk.Frame(self.content_frame, bg=self.colors['bg2'], padx=15, pady=15)
+        container.pack(fill='both', expand=True)
+        
+        tk.Label(container, text="Analytics Dashboard", font=('Segoe UI', 12, 'bold'),
+                bg=self.colors['bg2'], fg=self.colors['text']).pack(anchor='w', pady=(0, 10))
+        
+        # Placeholder - will add actual analytics
+        tk.Label(container, text="Analytics data will appear here",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['muted']).pack()
     
     def show_history(self):
         """Show usage history graph with time labels"""
