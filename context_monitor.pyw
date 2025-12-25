@@ -1104,11 +1104,21 @@ Read those logs to understand what we were working on, then continue helping me.
             print(f"[Reload] Error: {e}")
     
     def toggle_mini_mode(self):
-        """Toggle between full and mini mode"""
-        self.mini_mode = not self.mini_mode
+        """Cycle through display modes: mini → compact → full → mini"""
+        # Cycle through modes
+        if self.display_mode == 'mini':
+            self.display_mode = 'compact'
+        elif self.display_mode == 'compact':
+            self.display_mode = 'full'
+        else:  # full
+            self.display_mode = 'mini'
+        
+        # Update legacy mini_mode for compatibility
+        self.mini_mode = (self.display_mode == 'mini')
+        
         self.save_settings()
         self.setup_ui()
-        self.load_session()
+        # Don't call load_session() - it's expensive and not needed for mode switch
     
     def adjust_alpha(self, delta):
         """Adjust transparency"""
