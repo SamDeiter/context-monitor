@@ -2890,4 +2890,3 @@ if __name__ == '__main__':
         with open("crash_log.txt", "w") as f:
             f.write(traceback.format_exc())
         messagebox.showerror("Context Monitor Crash", f"Application crashed:\n{e}")
-they still are not 
