@@ -1372,19 +1372,31 @@ Read those logs to understand what we were working on, then continue helping me.
             self.render_token_stats_inline()
         elif self.active_tab == 'history':
             self.render_history_inline()
+```
         elif self.active_tab == 'analytics':
             self.render_analytics_inline()
     
     def render_history_inline(self):
         """Render usage history graph inline"""
-        canvas = tk.Canvas(self.content_frame, width=620, height=400,
+        # Add title
+        title = tk.Label(self.content_frame, text="📅 Usage History (Last 24h)", 
+                        font=('Segoe UI', 12, 'bold'),
+                        bg=self.colors['bg2'], fg=self.colors['text'])
+        title.pack(anchor='w', padx=15, pady=(15, 5))
+        
+        # Graph canvas
+        canvas = tk.Canvas(self.content_frame, width=620, height=380,
                           bg=self.colors['bg2'], highlightthickness=1,
                           highlightbackground=self.colors['bg3'])
-        canvas.pack(padx=15, pady=15, fill='both', expand=True)
+        canvas.pack(padx=15, pady=10, fill='both', expand=True)
         
-        # Reuse draw_mini_graph logic but with larger canvas
+        # Draw graph immediately
         self.graph_canvas = canvas
-        self.root.after(100, self.draw_mini_graph)
+        try:
+            self.draw_mini_graph()
+        except Exception as e:
+            canvas.create_text(310, 190, text=f"Graph error: {e}",
+                             fill=self.colors['muted'], font=('Segoe UI', 10))
     
     def render_diagnostics_inline(self):
         """Render system diagnostics inline"""
