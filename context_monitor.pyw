@@ -573,8 +573,8 @@ class ContextMonitor:
             self.content_frame = tk.Frame(self.root, bg=self.colors['bg2'])
             self.content_frame.pack(fill='both', expand=True)
             
-            # Render active tab content
-            self.root.after(100, self.render_tab_content)
+            # Render active tab content immediately
+            self.render_tab_content()
             
             # Action buttons at bottom
             actions_bar = tk.Frame(self.root, bg=self.colors['bg3'], padx=10, pady=8)
