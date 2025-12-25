@@ -164,14 +164,115 @@ class ContextMonitor:
         atexit.register(self._cleanup_processes)
         self.root.protocol("WM_DELETE_WINDOW", self.cleanup_and_exit)
         
-        self.setup_ui()
+        # Register event handlers
         self.root.bind('<Button-3>', self.show_context_menu)  # Right-click anywhere
+        
+        self.setup_ui()
         self.load_session()
         self.root.after(self.polling_interval, self.auto_refresh)
         self.root.after(500, self.flash_warning)
         
         # Restore window position after UI is ready
         self.root.after(100, self.restore_window_position)
+    
+    def parse_varint(self, data, offset):
+        """Parse a protobuf varint from data at offset."""
+        result = 0
+        shift = 0
+        while offset < len(data):
+            byte = data[offset]
+            offset += 1
+            result |= (byte & 0x7F) << shift
+            if not (byte & 0x80):
+                return result, offset
+            shift += 7
+        return None, offset
+    
+    def extract_pb_tokens(self, pb_file_path):
+        """
+        Extract accurate token count from protobuf conversation file.
+        
+        Returns dict with:
+            - tokens_used: actual tokens consumed
+            - context_window: total context window size
+            - tokens_remaining: tokens left
+        
+        Falls back to file size estimation if parsing fails.
+        """
+        try:
+            with open(pb_file_path, 'rb') as f:
+                data = f.read()
+            
+            file_size = len(data)
+            
+            # Search last 50KB for token metadata (most recent data)
+            search_region = data[-50000:] if len(data) > 50000 else data
+            
+            # Extract all varint numbers in reasonable token range
+            candidates = []
+            offset = 0
+            while offset < len(search_region) - 10:
+                num, new_offset = self.parse_varint(search_region, offset)
+                if num and 100000 < num < 20000000:  # 100K to 20M tokens
+                    candidates.append({
+                        'value': num,
+                        'position': offset
+                    })
+                offset += 1
+            
+            if not candidates:
+                # Fallback to old estimation
+                estimated = file_size // 4
+                return {
+                    'tokens_used': estimated // 10,
+                    'context_window': self._context_window,
+                    'tokens_remaining': self._context_window - (estimated // 10),
+                    'method': 'fallback'
+                }
+            
+            # Sort by position (most recent last)
+            candidates.sort(key=lambda x: x['position'])
+            recent = candidates[-5:]  # Last 5 candidates
+            
+            # Heuristic: Look for large number (context window) followed by smaller (remaining)
+            context_window = None
+            tokens_remaining = None
+            
+            for i in range(len(recent) - 1):
+                curr = recent[i]['value']
+                next_val = recent[i + 1]['value']
+                
+                if curr > next_val and curr > 1000000:
+                    context_window = curr
+                    tokens_remaining = next_val
+                    break
+            
+            # Fallback: use largest as window, second-largest as remaining
+            if not context_window:
+                sorted_vals = sorted([c['value'] for c in recent], reverse=True)
+                context_window = sorted_vals[0] if sorted_vals else self._context_window
+                tokens_remaining = sorted_vals[1] if len(sorted_vals) > 1 else context_window // 2
+            
+            tokens_used = context_window - tokens_remaining
+            
+            return {
+                'tokens_used': tokens_used,
+                'context_window': context_window,
+                'tokens_remaining': tokens_remaining,
+                'method': 'protobuf'
+            }
+            
+        except Exception as e:
+            # Fallback to old method on any error
+            print(f"[Token Extraction] Error parsing {pb_file_path.name}: {e}")
+            estimated = pb_file_path.stat().st_size // 4
+            return {
+                'tokens_used': estimated // 10,
+                'context_window': self._context_window,
+                'tokens_remaining': self._context_window - (estimated // 10),
+                'method': 'fallback'
+            }
+
         
     def setup_ui(self):
         # Clear existing widgets
@@ -465,13 +566,21 @@ class ContextMonitor:
                                 session_id = name[:-3]
                             else:
                                 session_id = name[:-6]  # .pb.gz
-                                
+                            
+                            # Build full path for token extraction
+                            pb_path = self.conversations_dir / name
+                            
+                            # Extract accurate token data from protobuf
+                            token_data = self.extract_pb_tokens(pb_path)
+                            
                             sessions.append({
                                 'id': session_id,
                                 'size': stat.st_size,
                                 'modified': stat.st_mtime,
-                                'estimated_tokens': stat.st_size // 4,
-                                'compressed': is_gz
+                                'estimated_tokens': stat.st_size // 4,  # Keep for comparison
+                                'token_data': token_data,  # Accurate extraction
+                                'compressed': is_gz,
+                                'pb_path': pb_path
                             })
                         except Exception:
                             continue
@@ -633,8 +742,27 @@ class ContextMonitor:
                 self.selected_session_id = None
 
         context_window = self._context_window
-        tokens_used = self.current_session['estimated_tokens'] // 10
-        tokens_left = max(0, context_window - tokens_used)
+        
+        # Use accurate token data from protobuf extraction
+        if 'token_data' in self.current_session and self.current_session['token_data']:
+            token_data = self.current_session['token_data']
+            tokens_used = token_data['tokens_used']
+            context_window = token_data['context_window']
+            tokens_left = token_data['tokens_remaining']
+            
+            # Log extraction method for debugging
+            if token_data.get('method') == 'protobuf':
+                # Successfully extracted from protobuf
+                pass
+            else:
+                # Fallback was used
+                print(f"[Token Extraction] Using fallback for {self.current_session['id'][:16]}...")
+        else:
+            # Fallback to old estimation if token_data not available
+            tokens_used = self.current_session['estimated_tokens'] // 10
+            tokens_left = max(0, context_window - tokens_used)
+            print(f"[Token Extraction] No token_data available, using old estimation")
+        
         percent = min(100, round((tokens_used / context_window) * 100))
         
         # Calculate delta from last reading
