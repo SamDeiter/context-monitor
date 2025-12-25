@@ -1366,12 +1366,12 @@ Read those logs to understand what we were working on, then continue helping me.
         # Group sessions by project name
         projects = OrderedDict()
         for s in sessions:
-            # Get project name (use cache or detect)
+            # PERFORMANCE: Only use cached names in menu (no expensive detection)
             if s['id'] in self.project_name_cache:
                 project_name = self.project_name_cache[s['id']]
             else:
-                # Quick detection for menu (skip expensive PowerShell)
-                project_name = self.get_project_name(s['id'], skip_vscode=True)
+                # Fallback to session ID for uncached sessions (fast)
+                project_name = s['id'][:16] + "..."
             
             if project_name not in projects:
                 projects[project_name] = []
@@ -2890,3 +2890,4 @@ if __name__ == '__main__':
         with open("crash_log.txt", "w") as f:
             f.write(traceback.format_exc())
         messagebox.showerror("Context Monitor Crash", f"Application crashed:\n{e}")
+they still are not 
