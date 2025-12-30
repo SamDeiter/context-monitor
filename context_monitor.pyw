@@ -950,41 +950,42 @@ class ContextMonitor:
             # Use project name from file if session was manually selected
             display_name = self.get_project_name(self.current_session['id'], skip_vscode=is_manual_session)
         
-        # Update UI labels if they exist
-        if hasattr(self, 'session_label'):
-            self.session_label.config(text=display_name)
+            # Update UI labels if they exist (Compact/Full mode)
+            if hasattr(self, 'session_label'):
+                self.session_label.config(text=display_name)
+
+        # Update tray icon (Run in all modes)
+        if HAS_TRAY:
+            self.update_tray_icon()
+        
+        # Update mini history panel with recent deltas
+        if hasattr(self, 'history_labels'):
+            history_data = self.load_history().get(self.current_session['id'], [])
+            # Get last 5 entries with non-zero deltas
+            recent_deltas = [h for h in history_data if h.get('delta', 0) != 0][-5:]
             
-            # Update tray icon
-            if HAS_TRAY:
-                self.update_tray_icon()
-            
-            # Update mini history panel with recent deltas
-            if hasattr(self, 'history_labels'):
-                history_data = self.load_history().get(self.current_session['id'], [])
-                # Get last 5 entries with non-zero deltas
-                recent_deltas = [h for h in history_data if h.get('delta', 0) != 0][-5:]
-                
-                for i, lbl in enumerate(self.history_labels):
-                    if i < len(recent_deltas):
-                        d = recent_deltas[-(i+1)]  # Reverse order (newest first)
-                        delta_val = d.get('delta', 0)
-                        if delta_val > 0:
-                            text = f"+{delta_val:,}"
-                            # Color based on magnitude
-                            if delta_val > 5000:
-                                color = self.colors['red']
-                            elif delta_val > 2000:
-                                color = self.colors['yellow']
-                            else:
-                                color = self.colors['green']
+            for i, lbl in enumerate(self.history_labels):
+                if i < len(recent_deltas):
+                    d = recent_deltas[-(i+1)]  # Reverse order (newest first)
+                    delta_val = d.get('delta', 0)
+                    if delta_val > 0:
+                        text = f"+{delta_val:,}"
+                        # Color based on magnitude
+                        if delta_val > 5000:
+                            color = self.colors['red']
+                        elif delta_val > 2000:
+                            color = self.colors['yellow']
                         else:
-                            text = f"{delta_val:,}"
-                            color = self.colors['blue']
-                        lbl.config(text=text, fg=color)
+                            color = self.colors['green']
                     else:
-                        lbl.config(text="—", fg=self.colors['muted'])
-            
-            # Update status and auto-copy at 80%
+                        text = f"{delta_val:,}"
+                        color = self.colors['blue']
+                    lbl.config(text=text, fg=color)
+                else:
+                    lbl.config(text="—", fg=self.colors['muted'])
+        
+        # Update status and auto-copy at 80% (Requires status_label/frame)
+        if hasattr(self, 'status_label') and hasattr(self, 'status_frame'):
             if percent >= 80:
                 self.status_label.config(text="🔴 Handoff copied!", fg=self.colors['red'])
                 self.status_frame.config(bg='#2d1518')
@@ -2823,6 +2824,115 @@ Read those logs to understand what we were working on, then continue helping me.
             v.pack(side='right')
             self._dashboard_refs['model_bars'].append({'row': f, 'name': l, 'bar': b_fill, 'val': v})
 
+        # ===== BUDGET SETTING =====
+        budget_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
+        budget_frame.pack(fill='x', pady=(10, 0))
+        
+        tk.Label(budget_frame, text="💰 Daily Budget:",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
+        
+        budget_var = tk.StringVar(value=str(self._daily_budget))
+        budget_entry = tk.Entry(budget_frame, textvariable=budget_var, width=10,
+                               bg=self.colors['bg3'], fg=self.colors['text'],
+                               insertbackground=self.colors['text'], font=('Consolas', 10))
+        budget_entry.pack(side='left', padx=10)
+        
+        def save_budget():
+            try:
+                new_budget = int(budget_var.get())
+                self._daily_budget = new_budget
+                self.settings['daily_budget'] = new_budget
+                self.save_settings()
+                tk.Label(budget_frame, text="✓ Saved", font=('Segoe UI', 9),
+                        bg=self.colors['bg2'], fg=self.colors['green']).pack(side='left')
+            except ValueError:
+                pass
+        
+        tk.Button(budget_frame, text="Save", command=save_budget,
+                 bg=self.colors['blue'], fg='white', font=('Segoe UI', 9),
+                 relief='flat', padx=10).pack(side='left')
+        
+        # ===== CONTEXT WINDOW SETTING =====
+        ctx_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
+        ctx_frame.pack(fill='x', pady=(10, 0))
+        
+        tk.Label(ctx_frame, text="🎯 Context Window:",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
+        
+        ctx_var = tk.StringVar(value=str(self._context_window))
+        ctx_entry = tk.Entry(ctx_frame, textvariable=ctx_var, width=12,
+                            bg=self.colors['bg3'], fg=self.colors['text'],
+                            insertbackground=self.colors['text'], font=('Consolas', 10))
+        ctx_entry.pack(side='left', padx=10)
+        
+        def save_context():
+            try:
+                new_ctx = int(ctx_var.get())
+                self._context_window = new_ctx
+                self.settings['context_window'] = new_ctx
+                self.save_settings()
+                ctx_status.config(text="✓")
+                win.after(1500, lambda: ctx_status.config(text=""))
+            except ValueError:
+                pass
+        
+        tk.Button(ctx_frame, text="Save", command=save_context,
+                 bg=self.colors['blue'], fg='white', font=('Segoe UI', 9),
+                 relief='flat', padx=5).pack(side='left')
+        
+        ctx_status = tk.Label(ctx_frame, text="", font=('Segoe UI', 9),
+                             bg=self.colors['bg2'], fg=self.colors['green'])
+        ctx_status.pack(side='left', padx=5)
+        # Model selector dropdown
+        model_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
+        model_frame.pack(fill='x', pady=(10, 0))
+        
+        tk.Label(model_frame, text="🤖 AI Model:",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
+        
+        # Model presets with context windows
+        models = self.MODELS
+        
+        # Determine current model from context window if not saved
+        if 'model' not in self.settings:
+             current_model = "Custom"
+             for name, ctx in models.items():
+                 if ctx == self._context_window:
+                     current_model = name
+                     break
+             self.settings['model'] = current_model
+        
+        current_model = self.settings.get('model', 'Custom')
+        
+        model_var = tk.StringVar(value=current_model)
+        
+        # Create dropdown menu
+        model_menu = tk.OptionMenu(model_frame, model_var, *models.keys())
+        model_menu.config(bg=self.colors['bg3'], fg=self.colors['text'],
+                         activebackground=self.colors['blue'], activeforeground='white',
+                         highlightthickness=0, font=('Segoe UI', 9))
+        model_menu['menu'].config(bg=self.colors['bg3'], fg=self.colors['text'],
+                                  activebackground=self.colors['blue'], activeforeground='white')
+        model_menu.pack(side='left', padx=10)
+        
+        model_status = tk.Label(model_frame, text="", font=('Segoe UI', 9),
+                               bg=self.colors['bg2'], fg=self.colors['green'])
+        model_status.pack(side='left')
+        
+        def on_model_change(*args):
+            selected = model_var.get()
+            ctx = models.get(selected)
+            if ctx is not None:
+                self._context_window = ctx
+                ctx_var.set(str(ctx))
+                self.settings['context_window'] = ctx
+                self.settings['model'] = selected
+                self.save_settings()
+                model_status.config(text=f"✓ {ctx:,} tokens")
+                win.after(2000, lambda: model_status.config(text=""))
+        
+        model_var.trace('w', on_model_change)
+
         # Start update loop
         self.update_dashboard_stats(win)
 
@@ -3019,114 +3129,7 @@ Read those logs to understand what we were working on, then continue helping me.
         except Exception as e:
             print(f"Dashboard update error: {e}")
         
-        # ===== BUDGET SETTING =====
-        budget_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
-        budget_frame.pack(fill='x', pady=(10, 0))
-        
-        tk.Label(budget_frame, text="💰 Daily Budget:",
-                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
-        
-        budget_var = tk.StringVar(value=str(self._daily_budget))
-        budget_entry = tk.Entry(budget_frame, textvariable=budget_var, width=10,
-                               bg=self.colors['bg3'], fg=self.colors['text'],
-                               insertbackground=self.colors['text'], font=('Consolas', 10))
-        budget_entry.pack(side='left', padx=10)
-        
-        def save_budget():
-            try:
-                new_budget = int(budget_var.get())
-                self._daily_budget = new_budget
-                self.settings['daily_budget'] = new_budget
-                self.save_settings()
-                tk.Label(budget_frame, text="✓ Saved", font=('Segoe UI', 9),
-                        bg=self.colors['bg2'], fg=self.colors['green']).pack(side='left')
-            except ValueError:
-                pass
-        
-        tk.Button(budget_frame, text="Save", command=save_budget,
-                 bg=self.colors['blue'], fg='white', font=('Segoe UI', 9),
-                 relief='flat', padx=10).pack(side='left')
-        
-        # ===== CONTEXT WINDOW SETTING =====
-        ctx_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
-        ctx_frame.pack(fill='x', pady=(10, 0))
-        
-        tk.Label(ctx_frame, text="🎯 Context Window:",
-                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
-        
-        ctx_var = tk.StringVar(value=str(self._context_window))
-        ctx_entry = tk.Entry(ctx_frame, textvariable=ctx_var, width=12,
-                            bg=self.colors['bg3'], fg=self.colors['text'],
-                            insertbackground=self.colors['text'], font=('Consolas', 10))
-        ctx_entry.pack(side='left', padx=10)
-        
-        def save_context():
-            try:
-                new_ctx = int(ctx_var.get())
-                self._context_window = new_ctx
-                self.settings['context_window'] = new_ctx
-                self.save_settings()
-                ctx_status.config(text="✓")
-                win.after(1500, lambda: ctx_status.config(text=""))
-            except ValueError:
-                pass
-        
-        tk.Button(ctx_frame, text="Save", command=save_context,
-                 bg=self.colors['blue'], fg='white', font=('Segoe UI', 9),
-                 relief='flat', padx=5).pack(side='left')
-        
-        ctx_status = tk.Label(ctx_frame, text="", font=('Segoe UI', 9),
-                             bg=self.colors['bg2'], fg=self.colors['green'])
-        ctx_status.pack(side='left', padx=5)
-        # Model selector dropdown
-        model_frame = tk.Frame(main_frame, bg=self.colors['bg2'], padx=15, pady=10)
-        model_frame.pack(fill='x', pady=(10, 0))
-        
-        tk.Label(model_frame, text="🤖 AI Model:",
-                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['text2']).pack(side='left')
-        
-        # Model presets with context windows
-        models = self.MODELS
-        
-        # Determine current model from context window if not saved
-        if 'model' not in self.settings:
-             current_model = "Custom"
-             for name, ctx in models.items():
-                 if ctx == self._context_window:
-                     current_model = name
-                     break
-             self.settings['model'] = current_model
-        
-        current_model = self.settings.get('model', 'Custom')
-        
-        model_var = tk.StringVar(value=current_model)
-        
-        # Create dropdown menu
-        model_menu = tk.OptionMenu(model_frame, model_var, *models.keys())
-        model_menu.config(bg=self.colors['bg3'], fg=self.colors['text'],
-                         activebackground=self.colors['blue'], activeforeground='white',
-                         highlightthickness=0, font=('Segoe UI', 9))
-        model_menu['menu'].config(bg=self.colors['bg3'], fg=self.colors['text'],
-                                  activebackground=self.colors['blue'], activeforeground='white')
-        model_menu.pack(side='left', padx=10)
-        
-        model_status = tk.Label(model_frame, text="", font=('Segoe UI', 9),
-                               bg=self.colors['bg2'], fg=self.colors['green'])
-        model_status.pack(side='left')
-        
-        def on_model_change(*args):
-            selected = model_var.get()
-            ctx = models.get(selected)
-            if ctx is not None:
-                self._context_window = ctx
-                ctx_var.set(str(ctx))
-                self.settings['context_window'] = ctx
-                self.settings['model'] = selected
-                self.save_settings()
-                model_status.config(text=f"✓ {ctx:,} tokens")
-                win.after(2000, lambda: model_status.config(text=""))
-        
-        model_var.trace('w', on_model_change)
+
     
     def export_history_csv(self):
         """Export token history to CSV file"""
