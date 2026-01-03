@@ -30,11 +30,13 @@ COLORS = {
 
 # === AI MODELS ===
 MODELS = {
-    "Gemini 2.0 Flash": 1_000_000,
-    "Gemini 1.5 Pro": 2_000_000,
-    "Claude 3.5 Sonnet": 200_000,
-    "GPT-4o": 128_000,
-    "GPT-4 Turbo": 128_000,
+    "Gemini 3 Pro (High)": 1_000_000,
+    "Gemini 3 Pro (Low)": 1_000_000,
+    "Gemini 3 Flash": 1_000_000,
+    "Claude Sonnet 4.5": 200_000,
+    "Claude Sonnet 4.5 (Thinking)": 200_000,
+    "Claude Opus 4.5 (Thinking)": 200_000,
+    "GPT-OSS 120B (Medium)": 128_000,
     "Custom": None
 }
 
@@ -45,7 +47,7 @@ DEFAULT_SETTINGS = {
     'polling_interval': 10_000,  # ms
     'daily_budget': 1_000_000,
     'context_window': 1_000_000,
-    'model': 'Gemini 2.0 Flash',
+    'model': 'Gemini 3 Flash',
     'window_x': 50,
     'window_y': 50,
     'window_w': 480,
