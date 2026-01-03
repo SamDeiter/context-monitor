@@ -321,8 +321,19 @@ class ContextMonitor:
         current_geometry = self.root.geometry()
         # Extract position (format: WxH+X+Y)
         pos = current_geometry.split('+')
+        size = pos[0].split('x')
+        w_px = size[0] if len(size) > 0 else "480"
+        h_px = size[1] if len(size) > 1 else "240"
         x_pos = pos[1] if len(pos) > 1 else "50"
         y_pos = pos[2] if len(pos) > 2 else "50"
+        
+        # Load saved dimensions from settings if available
+        if self.display_mode == 'compact':
+            w_px = self.settings.get('window_w', w_px)
+            h_px = self.settings.get('window_h', h_px)
+        elif self.display_mode == 'full':
+            w_px = self.settings.get('full_w', "650")
+            h_px = self.settings.get('full_h', "650")
         
         if self.display_mode == 'mini':
             # Mini mode: circular gauge - reduced size, tighter fit
@@ -355,7 +366,7 @@ class ContextMonitor:
             # Compact mode (current "full" mode) - reset transparency
             # PERFORMANCE: Increased dimensions to 480x240 to prevent truncation
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"480x240+{x_pos}+{y_pos}")
+            self.root.geometry(f"{w_px}x{h_px}+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -488,11 +499,18 @@ class ContextMonitor:
             self.create_tooltip(self.session_label, "Current Project\nAuto-detected from VS Code/GitHub")
             self.create_tooltip(mini_btn, "Toggle Mini Mode (M)\nSwitch to compact view")
             self.create_tooltip(alpha_frame, "Transparency (+/-)\nAdjust window opacity")
+            
+            # Resize handle (bottom right)
+            resize_grip = tk.Label(self.status_frame, text="◢", font=('Segoe UI', 10),
+                                  bg=self.colors['bg3'], fg=self.colors['muted'], cursor='size_nw_se')
+            resize_grip.pack(side='right', padx=(5, 0))
+            resize_grip.bind('<Button-1>', self.start_resize)
+            resize_grip.bind('<B1-Motion>', self.resize_window)
         
         else:  # full mode
             # Full mode - larger window with tabbed analytics
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"650x650+{x_pos}+{y_pos}")
+            self.root.geometry(f"{w_px}x{h_px}+{x_pos}+{y_pos}")
             self.root.update()
             
             # Initialize tab state
@@ -619,6 +637,13 @@ class ContextMonitor:
             self.status_label = tk.Label(self.status_frame, text="✓ Ready", font=('Segoe UI', 8),
                                         bg=self.colors['bg3'], fg=self.colors['green'], anchor='w')
             self.status_label.pack(side='left', padx=10)
+            
+            # Resize handle (bottom right)
+            resize_grip = tk.Label(self.status_frame, text="◢", font=('Segoe UI', 10),
+                                  bg=self.colors['bg3'], fg=self.colors['muted'], cursor='size_nw_se')
+            resize_grip.pack(side='right', padx=(5, 0))
+            resize_grip.bind('<Button-1>', self.start_resize)
+            resize_grip.bind('<B1-Motion>', self.resize_window)
             
             self.copy_btn = tk.Label(self.status_frame, text="📋 Copy", 
                                     font=('Segoe UI', 8), cursor='hand2',
@@ -1183,6 +1208,23 @@ Read those logs to understand what we were working on, then continue helping me.
         x = self.root.winfo_x() + event.x - self.drag_x
         y = self.root.winfo_y() + event.y - self.drag_y
         self.root.geometry(f"+{x}+{y}")
+
+    def start_resize(self, event):
+        self.resize_start_x = event.x_root
+        self.resize_start_y = event.y_root
+        self.resize_start_w = self.root.winfo_width()
+        self.resize_start_h = self.root.winfo_height()
+        
+    def resize_window(self, event):
+        # Calculate new dimensions
+        new_w = max(400, self.resize_start_w + (event.x_root - self.resize_start_x))
+        new_h = max(200, self.resize_start_h + (event.y_root - self.resize_start_y))
+        
+        # Apply to window (maintaining position)
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
+        self.root.geometry(f"{new_w}x{new_h}+{x}+{y}")
+        self.save_settings()
         
     def load_settings(self):
         """Load settings from JSON file"""
@@ -1207,7 +1249,11 @@ Read those logs to understand what we were working on, then continue helping me.
                     'context_window': self._context_window,
                     'model': self.settings.get('model'), # Persist model name
                     'window_x': self.root.winfo_x(),
-                    'window_y': self.root.winfo_y()
+                    'window_y': self.root.winfo_y(),
+                    'window_w': self.root.winfo_width() if self.display_mode == 'compact' else self.settings.get('window_w', 480),
+                    'window_h': self.root.winfo_height() if self.display_mode == 'compact' else self.settings.get('window_h', 240),
+                    'full_w': self.root.winfo_width() if self.display_mode == 'full' else self.settings.get('full_w', 650),
+                    'full_h': self.root.winfo_height() if self.display_mode == 'full' else self.settings.get('full_h', 650)
                 }, f, indent=2)
         except Exception as e:
             print(f"Error saving settings: {e}")
