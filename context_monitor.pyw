@@ -457,9 +457,9 @@ class ContextMonitor:
                 lbl.bind('<Button-3>', self.show_context_menu)
                 self.history_labels.append(lbl)
             
-            # Status bar with copy button
-            self.status_frame = tk.Frame(content, bg=self.colors['bg3'], padx=8, pady=6)
-            self.status_frame.pack(fill='x', pady=(10, 0))
+            # Status bar (packed to root to ensure visibility)
+            self.status_frame = tk.Frame(self.root, bg=self.colors['bg3'], padx=8, pady=6)
+            self.status_frame.pack(fill='x', side='bottom')
             self.status_frame.bind('<Button-3>', self.show_context_menu)
             
             self.status_label = tk.Label(self.status_frame, text="✓ Loading...", 
@@ -611,14 +611,26 @@ class ContextMonitor:
             self.create_button(actions_bar, "📦 Archive", self.archive_old_sessions).pack(side='left', padx=2)
             self.create_button(actions_bar, "🔄 Restart", self.restart_antigravity).pack(side='left', padx=2)
             
-            # Status bar
-            status = tk.Frame(self.root, bg=self.colors['bg3'], height=24)
-            status.pack(fill='x', side='bottom')
-            status.pack_propagate(False)
+            # Status bar (Consistent across modes)
+            self.status_frame = tk.Frame(self.root, bg=self.colors['bg3'], height=28)
+            self.status_frame.pack(fill='x', side='bottom')
+            self.status_frame.pack_propagate(False)
             
-            self.status_label = tk.Label(status, text="✓ Ready", font=('Segoe UI', 8),
+            self.status_label = tk.Label(self.status_frame, text="✓ Ready", font=('Segoe UI', 8),
                                         bg=self.colors['bg3'], fg=self.colors['green'], anchor='w')
-            self.status_label.pack(side='left', padx=10, fill='x', expand=True)
+            self.status_label.pack(side='left', padx=10)
+            
+            self.copy_btn = tk.Label(self.status_frame, text="📋 Copy", 
+                                    font=('Segoe UI', 8), cursor='hand2',
+                                    bg=self.colors['bg3'], fg=self.colors['blue'])
+            self.copy_btn.pack(side='right', padx=10)
+            self.copy_btn.bind('<Button-1>', lambda e: self.copy_handoff())
+            
+            self.refresh_btn = tk.Label(self.status_frame, text="🔄", 
+                                       font=('Segoe UI', 10), cursor='hand2',
+                                       bg=self.colors['bg3'], fg=self.colors['blue'])
+            self.refresh_btn.pack(side='right', padx=5)
+            self.refresh_btn.bind('<Button-1>', lambda e: self.force_refresh())
         
         # Keyboard shortcuts (global)
         self.root.bind('<KeyPress-m>', lambda e: self.toggle_mini_mode())
