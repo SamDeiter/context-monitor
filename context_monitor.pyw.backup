@@ -18,7 +18,9 @@ import threading
 import time
 import csv
 from datetime import timedelta
-from utils import get_total_memory, calculate_thresholds, extract_pb_tokens
+from functools import partial
+from collections import OrderedDict
+from utils import parse_varint, get_total_memory, calculate_thresholds, extract_pb_tokens
 from widgets import ToolTip
 from config import COLORS, MODELS, DEFAULT_SETTINGS, SETTINGS_FILE, HISTORY_FILE, ANALYTICS_FILE, CONVERSATIONS_DIR, VSCODE_CACHE_TTL
 from data_service import data_service
@@ -555,7 +557,7 @@ class ContextMonitor:
         self.root.bind('<KeyPress-e>', lambda e: self.export_history_csv())
         
     def create_tooltip(self, widget, text):
-        _tooltip = ToolTip(widget, text, self.colors)  # noqa: F841 - returns None, keeps reference
+        tooltip = ToolTip(widget, text, self.colors)
         
     def draw_gauge(self, percent):
         # Don't delete all in mini mode (preserve circle background)
@@ -762,8 +764,8 @@ class ContextMonitor:
                 # Resolve (Heavy I/O)
                 self.resolve_session_metadata(s)
                 time.sleep(0.05)
-        except Exception:
-            pass  # Silently ignore metadata resolution errors
+        except Exception as e:
+            pass
 
     def get_active_vscode_project(self):
         """Get active VS Code project using ctypes with caching (Zero-overhead process check)"""
@@ -847,8 +849,8 @@ class ContextMonitor:
                     # Sort by modification time, newest first
                     projects.sort(key=lambda x: x[1], reverse=True)
                     return projects[0][0]
-        except Exception:
-            pass  # Silently ignore project detection errors
+        except Exception as e:
+            pass
         return None
 
     def get_project_name(self, session_id, skip_vscode=False):
@@ -1114,6 +1116,45 @@ class ContextMonitor:
                 self.status_frame.config(bg=self.colors['bg3'])
                 self.handoff_copied = False
             
+    def copy_handoff(self):
+        if not self.current_session:
+            return
+            
+        context_window = self._context_window
+        tokens_used = self.current_session['estimated_tokens'] // 10
+        tokens_left = max(0, context_window - tokens_used)
+        percent = min(100, round((tokens_used / context_window) * 100))
+        project_name = self.get_project_name(self.current_session['id'], skip_vscode=True)
+        
+        home = Path.home()
+        brain_path = home / '.gemini' / 'antigravity' / 'brain' / self.current_session['id']
+        handoff = f"""# CONTEXT BRIDGE: {project_name.upper()}
+I am continuing work on the `{project_name}` project. We are reaching the context window limit ({percent}% used).
+
+## 📍 Critical Paths
+- **Conversation ID:** `{self.current_session['id']}`
+- **Brain Folder:** `{brain_path}`
+- **Task List:** `{brain_path}\\task.md`
+- **Plan:** `{brain_path}\\implementation_plan.md`
+- **Logs:** `{brain_path}\\.system_generated\\logs\\`
+
+## 📊 Token Usage
+- **Used:** {tokens_used:,} / {context_window:,}
+- **Remaining:** {tokens_left:,}
+
+## 🚀 Next Steps for Agent
+1. Read `{brain_path}\\task.md` to see the current progress.
+2. Read the latest log in `.system_generated\\logs\\` for the most recent context.
+3. Continue the task as outlined in the implementation plan.
+"""
+        
+        self.root.clipboard_clear()
+        self.root.clipboard_append(handoff)
+        
+        # Flash the button
+        self.copy_btn.config(text="✓ Copied!", fg=self.colors['green'])
+        self.root.after(2000, lambda: self.copy_btn.config(text="📋 Copy", fg=self.colors['blue']))
+            
     def auto_refresh(self):
         self.load_session()
         self.root.after(self.polling_interval, self.auto_refresh)
@@ -1146,6 +1187,12 @@ class ContextMonitor:
             del self.project_name_cache[session_id]
         self.load_session()
     
+    def set_polling_speed(self, interval_ms):
+        """Set the polling interval in milliseconds"""
+        self.polling_interval = interval_ms
+        self.save_settings()
+        print(f"[Settings] Polling interval set to {interval_ms}ms")
+        
     def start_drag(self, event):
         self.drag_x = event.x
         self.drag_y = event.y
@@ -1503,7 +1550,6 @@ class ContextMonitor:
         tokens_used = self.current_session['estimated_tokens'] // 10
         context_limit = self._context_window
         percent_used = min(100, (tokens_used / context_limit) * 100)
-        tokens_left = max(0, context_limit - tokens_used)
         
         container = tk.Frame(parent, bg=self.colors['bg2'], padx=15, pady=15)
         container.pack(fill='both', expand=True)
@@ -1961,6 +2007,14 @@ class ContextMonitor:
         # Check budget notification
         today = datetime.now().strftime('%Y-%m-%d')
         self.check_budget_notification(analytics, today)
+    def check_budget_notification(self, analytics, today):
+        """Send desktop notification if approaching daily budget"""
+        if not HAS_TOAST or not self._notifier:
+            return
+            
+        daily_usage = analytics['daily'].get(today, {}).get('total', 0)
+        budget = self._daily_budget
+        
     def check_budget_notification(self, analytics, today):
         """Send desktop notification if approaching daily budget"""
         daily_usage = analytics['daily'].get(today, {}).get('total', 0)

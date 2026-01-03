@@ -4,7 +4,7 @@ Handles all file I/O for history and analytics with caching and throttling.
 """
 import json
 import time
-from pathlib import Path
+# Path objects provided by config module
 from datetime import datetime
 
 from config import HISTORY_FILE, ANALYTICS_FILE, HISTORY_CACHE_TTL, ANALYTICS_SAVE_THROTTLE, MAX_HISTORY_POINTS

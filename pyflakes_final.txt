@@ -1,0 +1,7 @@
+context_monitor.pyw:558:9: local variable 'tooltip' is assigned to but never used
+context_monitor.pyw:765:9: local variable 'e' is assigned to but never used
+context_monitor.pyw:850:9: local variable 'e' is assigned to but never used
+context_monitor.pyw:1466:9: local variable 'files' is assigned to but never used
+context_monitor.pyw:1768:9: 'datetime.timedelta' imported but unused
+context_monitor.pyw:1801:16: f-string is missing placeholders
+dialogs.py:110:9: `nonlocal refresh_id` is unused: name is never assigned in scope

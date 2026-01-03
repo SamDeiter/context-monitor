@@ -5,7 +5,7 @@ Includes protobuf parsing, system memory detection, and token extraction logic.
 import ctypes
 import platform
 import re
-from pathlib import Path
+# Path objects passed from callers, no import needed
 
 def parse_varint(data, offset):
     """Parse a protobuf varint from data at offset."""

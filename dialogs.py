@@ -6,8 +6,7 @@ All dialogs receive the monitor instance to access state and methods.
 """
 import tkinter as tk
 from tkinter import messagebox
-from datetime import datetime, timedelta
-from collections import OrderedDict
+from datetime import datetime
 
 
 def show_history_dialog(monitor):
