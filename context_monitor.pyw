@@ -329,6 +329,13 @@ class ContextMonitor:
             self.delta_label.pack(anchor='w')
             self.delta_label.bind('<Button-3>', self.show_context_menu)
             
+            # Time to handoff label
+            self.ttf_label = tk.Label(info, text="⏱️ —", font=('Segoe UI', 8),
+                                      bg=self.colors['bg2'], fg=self.colors['text2'])
+            self.ttf_label.pack(anchor='w')
+            self.ttf_label.bind('<Button-3>', self.show_context_menu)
+            self.create_tooltip(self.ttf_label, "Estimated Time to Handoff\nBased on recent token burn rate")
+            
             tk.Label(info, text="PROJECT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(8,0))
             self.session_label = tk.Label(info, text="—", font=('Segoe UI', 10),
@@ -469,6 +476,11 @@ class ContextMonitor:
                                        bg=self.colors['bg2'], fg=self.colors['blue'])
             self.delta_label.pack(anchor='w')
             
+            # Time to handoff label
+            self.ttf_label = tk.Label(info, text="⏱️ —", font=('Segoe UI', 9),
+                                      bg=self.colors['bg2'], fg=self.colors['text2'])
+            self.ttf_label.pack(anchor='w')
+            
             self.project_label = tk.Label(info, text="", font=('Segoe UI', 9),
                                          bg=self.colors['bg2'], fg=self.colors['muted'])
             self.project_label.pack(anchor='w', pady=(2, 0))
@@ -583,19 +595,20 @@ class ContextMonitor:
                                          style='arc', outline=color, width=arc_width, tags='arc')
         
         # Larger fonts for mini mode
-        pct_font_size = 22 if self.mini_mode else 14
+        pct_font_size = 20 if self.mini_mode else 14
         
         # Drop shadow for mini mode (offset dark text behind) - only for percentage
         if self.mini_mode:
             shadow_offset = 2
             shadow_color = '#000000'
-            # Draw percentage slightly higher to make room for delta
-            self.gauge_canvas.create_text(cx+shadow_offset, cy-8+shadow_offset, text=f"{percent}%", 
+            
+            # Draw percentage at top area
+            self.gauge_canvas.create_text(cx+shadow_offset, cy-18+shadow_offset, text=f"{percent}%", 
                                           font=('Segoe UI', pct_font_size, 'bold'), fill=shadow_color, tags='text')
-            self.gauge_canvas.create_text(cx, cy-8, text=f"{percent}%", 
+            self.gauge_canvas.create_text(cx, cy-18, text=f"{percent}%", 
                                           font=('Segoe UI', pct_font_size, 'bold'), fill=self.colors['text'], tags='text')
             
-            # Show latest delta below percentage
+            # Show latest delta in middle
             if hasattr(self, 'current_session') and self.current_session:
                 history_data = self.load_history().get(self.current_session['id'], [])
                 recent_deltas = [h for h in history_data if h.get('delta', 0) != 0]
@@ -613,11 +626,33 @@ class ContextMonitor:
                         delta_text = f"{last_delta:,}"
                         delta_color = self.colors['blue']
                     
-                    # Draw delta with shadow
-                    self.gauge_canvas.create_text(cx+1, cy+18+1, text=delta_text, 
-                                                  font=('Consolas', 10, 'bold'), fill=shadow_color, tags='text')
-                    self.gauge_canvas.create_text(cx, cy+18, text=delta_text, 
-                                                  font=('Consolas', 10, 'bold'), fill=delta_color, tags='text')
+                    # Draw delta in middle
+                    self.gauge_canvas.create_text(cx+1, cy+6+1, text=delta_text, 
+                                                  font=('Consolas', 9), fill=shadow_color, tags='text')
+                    self.gauge_canvas.create_text(cx, cy+6, text=delta_text, 
+                                                  font=('Consolas', 9), fill=delta_color, tags='text')
+                
+                # Time to handoff at bottom
+                seconds = self.calculate_time_to_handoff()
+                time_str = self.format_time_remaining(seconds)
+                
+                # Color based on urgency
+                if seconds is None:
+                    ttf_color = self.colors['muted']
+                elif seconds <= 0:
+                    ttf_color = self.colors['red']
+                elif seconds < 300:  # < 5 min
+                    ttf_color = self.colors['red']
+                elif seconds < 900:  # < 15 min
+                    ttf_color = self.colors['yellow']
+                else:
+                    ttf_color = self.colors['green']
+                
+                # Draw TTF at bottom with shadow
+                self.gauge_canvas.create_text(cx+1, cy+26+1, text=f"⏱{time_str}", 
+                                              font=('Segoe UI', 8), fill=shadow_color, tags='text')
+                self.gauge_canvas.create_text(cx, cy+26, text=f"⏱{time_str}", 
+                                              font=('Segoe UI', 8), fill=ttf_color, tags='text')
         else:
             # Full mode - just draw percentage centered
             self.gauge_canvas.create_text(cx, cy, text=f"{percent}%", 
@@ -1020,6 +1055,25 @@ class ContextMonitor:
                         lbl.config(text=text, fg=color, font=('Consolas', 11))
                 else:
                     lbl.config(text="—", fg=self.colors['muted'], font=('Consolas', 11))
+        
+        # Update time-to-handoff label if exists (Compact/Full mode)
+        if hasattr(self, 'ttf_label'):
+            seconds = self.calculate_time_to_handoff()
+            time_str = self.format_time_remaining(seconds)
+            
+            # Color based on urgency
+            if seconds is None:
+                ttf_color = self.colors['text2']
+            elif seconds <= 0:
+                ttf_color = self.colors['red']
+            elif seconds < 300:  # < 5 min
+                ttf_color = self.colors['red']
+            elif seconds < 900:  # < 15 min
+                ttf_color = self.colors['yellow']
+            else:
+                ttf_color = self.colors['green']
+            
+            self.ttf_label.config(text=f"⏱️ {time_str}", fg=ttf_color)
         
         # Update tab-specific labels if they exist (Full Mode Caching)
         if hasattr(self, 'stats_tokens_used_label') and self.stats_tokens_used_label.winfo_exists():
