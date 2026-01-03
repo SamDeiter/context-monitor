@@ -1057,7 +1057,7 @@ class ContextMonitor:
                     lbl.config(text="—", fg=self.colors['muted'], font=('Consolas', 11))
         
         # Update time-to-handoff label if exists (Compact/Full mode)
-        if hasattr(self, 'ttf_label'):
+        if hasattr(self, 'ttf_label') and self.ttf_label.winfo_exists():
             seconds = self.calculate_time_to_handoff()
             time_str = self.format_time_remaining(seconds)
             
