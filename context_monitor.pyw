@@ -22,6 +22,7 @@ import time
 import csv
 from datetime import timedelta
 from functools import partial
+from collections import OrderedDict
 from utils import parse_varint, get_total_memory, calculate_thresholds, extract_pb_tokens
 from widgets import ToolTip
 from config import COLORS, MODELS, DEFAULT_SETTINGS, SETTINGS_FILE, HISTORY_FILE, ANALYTICS_FILE, CONVERSATIONS_DIR, BRAIN_DIR, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, FONTS
