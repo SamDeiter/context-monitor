@@ -977,6 +977,8 @@ class ContextMonitor:
             # Update UI labels if they exist (Compact/Full mode)
             if hasattr(self, 'session_label'):
                 self.session_label.config(text=display_name)
+            if hasattr(self, 'project_label'):
+                self.project_label.config(text=display_name)
 
         # Update tray icon (Run in all modes)
         if HAS_TRAY:
