@@ -271,10 +271,21 @@ class ContextMonitor:
             
             tokens_used = context_window - tokens_remaining
             
+            # PERFORMANCE: Fast raw scan for project name in binary (no full parse)
+            project_name = None
+            try:
+                # Look for GitHub project path pattern in the binary blob
+                project_match = re.search(rb'GitHub[/\\]([A-Za-z0-9_-]+)', data)
+                if project_match:
+                    project_name = project_match.group(1).decode('utf-8', errors='ignore')
+            except:
+                pass
+
             return {
                 'tokens_used': tokens_used,
                 'context_window': context_window,
                 'tokens_remaining': tokens_remaining,
+                'project_name': project_name,
                 'method': 'protobuf'
             }
             
@@ -738,6 +749,7 @@ class ContextMonitor:
                                 'modified': stat.st_mtime,
                                 'estimated_tokens': stat.st_size // 4,  # Keep for comparison
                                 'token_data': token_data,  # Accurate extraction
+                                'project_name': token_data.get('project_name'),
                                 'compressed': is_gz,
                                 'pb_path': pb_path
                             })
@@ -847,16 +859,26 @@ class ContextMonitor:
                     for md_file in brain_dir.glob('*.md'):
                         try:
                             content = md_file.read_text(encoding='utf-8', errors='ignore')[:2000]
-                            # Look for project patterns
+                            # Priority 1: Specific project keywords
                             if 'UE5' in content or 'Blueprint' in content:
-                                project_name = 'UE5LMSBlueprint'
+                                project_name = 'UE5Blueprint'
                                 break
                             elif 'context-monitor' in content.lower() or 'Context Monitor' in content:
                                 project_name = 'context-monitor'
                                 break
-                            # Check for GitHub folder pattern in content
-                            pattern = r'GitHub[/\\]([A-Za-z0-9_-]+)'
-                            match = re.search(pattern, content)
+                            
+                            # Priority 2: Look for project-specific files like task.md or implementation_plan.md
+                            # which often contain the project name in headings or paths
+                            if 'Implementation Plan' in content or '# Task' in content:
+                                # Try to find a project name in bracketed links or paths
+                                pat = r'[/\\]GitHub[/\\]([A-Za-z0-9_-]+)'
+                                match = re.search(pat, content)
+                                if match:
+                                    project_name = match.group(1)
+                                    break
+                            
+                            # Priority 3: Generic GitHub path detection
+                            match = re.search(r'GitHub[/\\]([A-Za-z0-9_-]+)', content)
                             if match:
                                 project_name = match.group(1)
                                 break
@@ -894,6 +916,21 @@ class ContextMonitor:
     def load_session(self):
         sessions = self.get_sessions()
         self.sessions_cache = sessions # Store for context menu performance
+        
+        # PROACTIVE CACHE POPULATION: Resolve names for top 15 sessions (Background logic)
+        # We do this with skip_vscode=True to keep it fast
+        import time
+        now = time.time()
+        for s in sessions[:15]:
+            if s['id'] not in self.project_name_cache:
+                # Priority 1: Use project name found directly in protobuf
+                if s.get('project_name'):
+                    self.project_name_cache[s['id']] = s['project_name']
+                    self.project_name_timestamp[s['id']] = now
+                else:
+                    # Priority 2: Full directory/brain folder scan
+                    self.get_project_name(s['id'], skip_vscode=True)
+
         if not sessions:
             if not self.mini_mode and hasattr(self, 'status_label'):
                 self.status_label.config(text="⚠ No sessions")
