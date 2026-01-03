@@ -58,7 +58,8 @@ DEFAULT_SETTINGS = {
 MIN_WINDOW_WIDTH = 400
 MIN_WINDOW_HEIGHT = 200
 HISTORY_CACHE_TTL = 5  # seconds
-ANALYTICS_SAVE_THROTTLE = 30  # seconds
+ANALYTICS_SAVE_THROTTLE = 60  # seconds (increased from 30 for less disk I/O)
+VSCODE_CACHE_TTL = 10  # seconds - cache VS Code detection result
 MAX_HISTORY_POINTS = 200
 
 # === FONT DEFINITIONS ===

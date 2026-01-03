@@ -23,7 +23,7 @@ from functools import partial
 from collections import OrderedDict
 from utils import parse_varint, get_total_memory, calculate_thresholds, extract_pb_tokens
 from widgets import ToolTip
-from config import COLORS, MODELS, DEFAULT_SETTINGS, SETTINGS_FILE, HISTORY_FILE, ANALYTICS_FILE, CONVERSATIONS_DIR, BRAIN_DIR, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, FONTS
+from config import COLORS, MODELS, DEFAULT_SETTINGS, SETTINGS_FILE, HISTORY_FILE, ANALYTICS_FILE, CONVERSATIONS_DIR, BRAIN_DIR, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, FONTS, VSCODE_CACHE_TTL
 from data_service import data_service
 from dialogs import show_history_dialog, show_diagnostics_dialog, show_advanced_stats_dialog
 from menu_builder import build_context_menu
@@ -96,6 +96,10 @@ class ContextMonitor:
         # Performance/Lag Caching (Sprint 3)
         self.session_metadata_cache = {} # Key: session_id, Value: {mtime, size, token_data, project_name}
         self.conversations_mtime = 0
+        
+        # VS Code detection cache (reduce ctypes calls)
+        self._vscode_project_cache = None
+        self._vscode_cache_time = 0
         
         # Threading for background updates
         self._update_lock = threading.Lock()
@@ -730,7 +734,14 @@ class ContextMonitor:
             pass
 
     def get_active_vscode_project(self):
-        """Get active VS Code project using ctypes (Zero-overhead process check)"""
+        """Get active VS Code project using ctypes with caching (Zero-overhead process check)"""
+        import time
+        now = time.time()
+        
+        # Return cached result if still valid
+        if now - self._vscode_cache_time < VSCODE_CACHE_TTL:
+            return self._vscode_project_cache
+        
         try:
             # Use ctypes directly to avoid expensive subprocess/PowerShell calls
             user32 = ctypes.windll.user32
@@ -764,10 +775,18 @@ class ContextMonitor:
                             continue
                         clean = part.strip()
                         if clean and not clean.endswith('.py') and not clean.endswith('.js'):
+                            # Cache the successful result
+                            self._vscode_project_cache = clean
+                            self._vscode_cache_time = now
                             return clean
         except Exception:
             # Fail silently to avoid log spam/crashes on weird Windows APIs
+            self._vscode_project_cache = None
+            self._vscode_cache_time = now
             return None
+        
+        self._vscode_project_cache = None
+        self._vscode_cache_time = now
         return None
     
     def get_recently_modified_project(self):
