@@ -187,13 +187,15 @@ class ContextMonitor:
         return btn
     
     def setup_ui(self):
+        """Setup UI by delegating to ui_builder module (Phase 5: V2.52)"""
+        from ui_builder import setup_mini_mode, setup_compact_mode, setup_full_mode, bind_keyboard_shortcuts
+        
         # Clear existing widgets
         for widget in self.root.winfo_children():
             widget.destroy()
         
         # Preserve current position
         current_geometry = self.root.geometry()
-        # Extract position (format: WxH+X+Y)
         pos = current_geometry.split('+')
         size = pos[0].split('x')
         w_px = size[0] if len(size) > 0 else "480"
@@ -201,7 +203,7 @@ class ContextMonitor:
         x_pos = pos[1] if len(pos) > 1 else "50"
         y_pos = pos[2] if len(pos) > 2 else "50"
         
-        # Load saved dimensions from settings if available
+        # Load saved dimensions from settings
         if self.display_mode == 'compact':
             w_px = self.settings.get('window_w', w_px)
             h_px = self.settings.get('window_h', h_px)
@@ -209,350 +211,16 @@ class ContextMonitor:
             w_px = self.settings.get('full_w', "650")
             h_px = self.settings.get('full_h', "650")
         
+        # Delegate to ui_builder based on mode
         if self.display_mode == 'mini':
-            # Mini mode: circular gauge - reduced size, tighter fit
-            self.root.geometry(f"120x120+{x_pos}+{y_pos}")
-            self.root.update()  # Force resize
-            
-            # Use transparent color to create circular appearance
-            trans_color = '#010101'  # Nearly black, used as transparent
-            self.root.configure(bg=trans_color)
-            self.root.attributes('-transparentcolor', trans_color)
-            
-            self.gauge_canvas = tk.Canvas(self.root, width=120, height=120,
-                                          bg=trans_color, highlightthickness=0)
-            self.gauge_canvas.pack()
-            
-            # Draw circular background - reduced padding (was 10, now 4)
-            self.gauge_canvas.create_oval(4, 4, 116, 116, fill=self.colors['bg'], outline='')
-            
-            self.draw_gauge(self.current_percent)
-            
-            # Interactions
-            self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
-            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
-            
-            # Bind drag to canvas
-            self.gauge_canvas.bind('<Button-1>', self.start_drag)
-            self.gauge_canvas.bind('<B1-Motion>', self.drag)
-            
+            setup_mini_mode(self, x_pos, y_pos)
         elif self.display_mode == 'compact':
-            # Compact mode (current "full" mode) - reset transparency
-            # PERFORMANCE: Increased dimensions to 480x240 to prevent truncation
-            self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"{w_px}x{h_px}+{x_pos}+{y_pos}")
-            self.root.update()  # Force resize
-            
-            # Header
-            header = tk.Frame(self.root, bg=self.colors['bg3'], height=30)
-            header.pack(fill='x')
-            header.pack_propagate(False)
-            
-            title = tk.Label(header, text="📊 Context Monitor", font=('Segoe UI', 10, 'bold'),
-                            bg=self.colors['bg3'], fg=self.colors['text'])
-            title.pack(side='left', padx=10, pady=5)
-            
-            # Close button (packed first to be at far right)
-            close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
-                                bg=self.colors['bg3'], fg=self.colors['text2'], cursor='hand2')
-            close_btn.pack(side='right', padx=8)
-            close_action = self.minimize_to_tray if HAS_TRAY else self.cleanup_and_exit
-            close_btn.bind('<Button-1>', lambda e: close_action())
-            
-            # Resize handle (top right of header)
-            resize_grip = tk.Label(header, text="⤡", font=('Segoe UI', 14),
-                                  bg=self.colors['bg3'], fg=self.colors['blue'], cursor='size_nw_se')
-            resize_grip.pack(side='right', padx=4)
-            resize_grip.bind('<Button-1>', self.start_resize)
-            resize_grip.bind('<B1-Motion>', self.resize_window)
-            self.create_tooltip(resize_grip, "Drag to resize")
-            
-            # Mini mode toggle
-            mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
-                               bg=self.colors['bg3'], fg=self.colors['blue'])
-            mini_btn.pack(side='right', padx=5)
-            mini_btn.bind('<Button-1>', lambda e: self.toggle_mini_mode())
-            
-            # Transparency controls
-            alpha_frame = tk.Frame(header, bg=self.colors['bg3'])
-            alpha_frame.pack(side='right', padx=5)
-            
-            tk.Label(alpha_frame, text="−", font=('Segoe UI', 10), cursor='hand2',
-                    bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
-            alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(-0.05))
-            
-            tk.Label(alpha_frame, text="+", font=('Segoe UI', 10), cursor='hand2',
-                    bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
-            alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(0.05))
-            
-            for w in [header, title]:
-                w.bind('<Button-1>', self.start_drag)
-                w.bind('<B1-Motion>', self.drag)
-                w.bind('<Button-3>', self.show_context_menu)
-            
-            # Content
-            content = tk.Frame(self.root, bg=self.colors['bg2'], padx=15, pady=12)
-            content.pack(fill='both', expand=True)
-            content.bind('<Button-3>', self.show_context_menu)
-            
-            # Main row
-            main = tk.Frame(content, bg=self.colors['bg2'])
-            main.pack(fill='x')
-            main.bind('<Button-3>', self.show_context_menu)
-            
-            # Gauge
-            self.gauge_canvas = tk.Canvas(main, width=90, height=90, 
-                                          bg=self.colors['bg2'], highlightthickness=0)
-            self.gauge_canvas.pack(side='left', padx=(0, 12))
-            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
-            self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
-            self.draw_gauge(self.current_percent)
-            
-            # Info
-            info = tk.Frame(main, bg=self.colors['bg2'])
-            info.pack(side='left', fill='both', expand=True)
-            info.bind('<Button-3>', self.show_context_menu)
-            
-            tk.Label(info, text="TOKENS LEFT", font=('Segoe UI', 8),
-                    bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
-            self.tokens_label = tk.Label(info, text="—", font=('Segoe UI', 18, 'bold'),
-                                         bg=self.colors['bg2'], fg=self.colors['text'])
-            self.tokens_label.pack(anchor='w')
-            self.tokens_label.bind('<Button-3>', self.show_context_menu)
-            
-            # Delta label (tokens used since last refresh)
-            self.delta_label = tk.Label(info, text="", font=('Segoe UI', 8),
-                                        bg=self.colors['bg2'], fg=self.colors['muted'])
-            self.delta_label.pack(anchor='w')
-            self.delta_label.bind('<Button-3>', self.show_context_menu)
-            
-            # Time to handoff label
-            self.ttf_label = tk.Label(info, text="⏱️ —", font=('Segoe UI', 8),
-                                      bg=self.colors['bg2'], fg=self.colors['text2'])
-            self.ttf_label.pack(anchor='w')
-            self.ttf_label.bind('<Button-3>', self.show_context_menu)
-            self.create_tooltip(self.ttf_label, "Estimated Time to Handoff\nBased on recent token burn rate")
-            
-            tk.Label(info, text="PROJECT", font=('Segoe UI', 8),
-                    bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(8,0))
-            self.session_label = tk.Label(info, text="—", font=('Segoe UI', 10),
-                                          bg=self.colors['bg2'], fg=self.colors['text2'])
-            self.session_label.pack(anchor='w')
-            self.session_label.bind('<Button-3>', self.show_context_menu)
-            
-            # Mini history panel (right side) - shows recent deltas
-            history_frame = tk.Frame(main, bg=self.colors['bg3'], padx=6, pady=4)
-            history_frame.pack(side='right', fill='y', padx=(8, 0))
-            history_frame.bind('<Button-3>', self.show_context_menu)
-            
-            tk.Label(history_frame, text="RECENT", font=('Segoe UI', 9, 'bold'),
-                    bg=self.colors['bg3'], fg=self.colors['muted']).pack(anchor='center')
-            
-            self.history_labels = []
-            for i in range(5):  # Show last 5 deltas
-                # Font size increased to 11 for better readability
-                lbl = tk.Label(history_frame, text="—", font=('Consolas', 11),
-                              bg=self.colors['bg3'], fg=self.colors['text2'])
-                lbl.pack(anchor='e')
-                lbl.bind('<Button-3>', self.show_context_menu)
-                self.history_labels.append(lbl)
-            
-            # Status bar (packed to root to ensure visibility)
-            self.status_frame = tk.Frame(self.root, bg=self.colors['bg3'], padx=8, pady=6)
-            self.status_frame.pack(fill='x', side='bottom')
-            self.status_frame.bind('<Button-3>', self.show_context_menu)
-            
-            self.status_label = tk.Label(self.status_frame, text="✓ Loading...", 
-                                        font=('Segoe UI', 9),
-                                        bg=self.colors['bg3'], fg=self.colors['text2'])
-            self.status_label.pack(side='left')
-            self.status_label.bind('<Button-3>', self.show_context_menu)
-            
-            self.copy_btn = tk.Label(self.status_frame, text="📋 Copy", 
-                                    font=('Segoe UI', 8), cursor='hand2',
-                                    bg=self.colors['bg3'], fg=self.colors['blue'])
-            self.copy_btn.pack(side='right')
-            self.copy_btn.bind('<Button-1>', lambda e: self.copy_handoff())
-            
-            # Refresh button
-            self.refresh_btn = tk.Label(self.status_frame, text="🔄", 
-                                       font=('Segoe UI', 10), cursor='hand2',
-                                       bg=self.colors['bg3'], fg=self.colors['blue'])
-            self.refresh_btn.pack(side='right', padx=(0, 8))
-            self.refresh_btn.bind('<Button-1>', lambda e: self.force_refresh())
-            
-            # Tooltips (full mode only)
-            self.create_tooltip(self.gauge_canvas, "Token Usage\nGreen: Safe\nYellow: < 60% Left\nRed: < 80% Left")
-            self.create_tooltip(self.copy_btn, "Generate Handoff\nCreates a summary prompt for the next agent")
-            self.create_tooltip(self.refresh_btn, "Refresh (R)\nForce refresh project detection")
-            self.create_tooltip(self.session_label, "Current Project\nAuto-detected from VS Code/GitHub")
-            self.create_tooltip(mini_btn, "Toggle Mini Mode (M)\nSwitch to compact view")
-            self.create_tooltip(alpha_frame, "Transparency (+/-)\nAdjust window opacity")
+            setup_compact_mode(self, w_px, h_px, x_pos, y_pos)
+        else:
+            setup_full_mode(self, w_px, h_px, x_pos, y_pos)
         
-        else:  # full mode
-            # Full mode - larger window with tabbed analytics
-            self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"{w_px}x{h_px}+{x_pos}+{y_pos}")
-            self.root.update()
-            
-            # Initialize tab state
-            if not hasattr(self, 'active_tab'):
-                self.active_tab = 'history'
-            
-            # Header
-            header = tk.Frame(self.root, bg=self.colors['bg3'], height=30)
-            header.pack(fill='x')
-            header.pack_propagate(False)
-            
-            title = tk.Label(header, text="📊 Context Monitor", font=('Segoe UI', 10, 'bold'),
-                            bg=self.colors['bg3'], fg=self.colors['text'])
-            title.pack(side='left', padx=10, pady=5)
-            
-            # Close button
-            close_btn = tk.Label(header, text="✕", font=('Segoe UI', 10),
-                                bg=self.colors['bg3'], fg=self.colors['text2'], cursor='hand2')
-            close_btn.pack(side='right', padx=8)
-            close_action = self.minimize_to_tray if HAS_TRAY else self.cleanup_and_exit
-            close_btn.bind('<Button-1>', lambda e: close_action())
-            
-            # Resize handle (top right of header)
-            resize_grip = tk.Label(header, text="⤡", font=('Segoe UI', 14),
-                                  bg=self.colors['bg3'], fg=self.colors['blue'], cursor='size_nw_se')
-            resize_grip.pack(side='right', padx=4)
-            resize_grip.bind('<Button-1>', self.start_resize)
-            resize_grip.bind('<B1-Motion>', self.resize_window)
-            self.create_tooltip(resize_grip, "Drag to resize")
-            
-            # Mode toggle
-            mini_btn = tk.Label(header, text="◱", font=('Segoe UI', 12), cursor='hand2',
-                               bg=self.colors['bg3'], fg=self.colors['blue'])
-            mini_btn.pack(side='right', padx=5)
-            mini_btn.bind('<Button-1>', lambda e: self.toggle_mini_mode())
-            
-            # Transparency controls
-            alpha_frame = tk.Frame(header, bg=self.colors['bg3'])
-            alpha_frame.pack(side='right', padx=5)
-            
-            tk.Label(alpha_frame, text="−", font=('Segoe UI', 10), cursor='hand2',
-                    bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
-            alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(-0.05))
-            
-            tk.Label(alpha_frame, text="+", font=('Segoe UI', 10), cursor='hand2',
-                    bg=self.colors['bg3'], fg=self.colors['text2']).pack(side='left', padx=2)
-            alpha_frame.winfo_children()[-1].bind('<Button-1>', lambda e: self.adjust_alpha(0.05))
-            
-            for w in [header, title]:
-                w.bind('<Button-1>', self.start_drag)
-                w.bind('<B1-Motion>', self.drag)
-                w.bind('<Button-3>', self.show_context_menu)
-            
-            # Top info bar (gauge + tokens)
-            top_bar = tk.Frame(self.root, bg=self.colors['bg2'], padx=15, pady=10)
-            top_bar.pack(fill='x')
-            
-            # Gauge (smaller)
-            self.gauge_canvas = tk.Canvas(top_bar, width=70, height=70,
-                                          bg=self.colors['bg2'], highlightthickness=0)
-            self.gauge_canvas.pack(side='left', padx=(0, 12))
-            self.gauge_canvas.bind('<Button-3>', self.show_context_menu)
-            self.gauge_canvas.bind('<Double-Button-1>', lambda e: self.toggle_mini_mode())
-            self.draw_gauge(self.current_percent)
-            
-            # Info
-            info = tk.Frame(top_bar, bg=self.colors['bg2'])
-            info.pack(side='left', fill='both', expand=True)
-            
-            tk.Label(info, text="TOKENS LEFT", font=('Segoe UI', 8),
-                    bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
-            
-            self.tokens_label = tk.Label(info, text="Loading...", font=('Segoe UI', 14, 'bold'),
-                                        bg=self.colors['bg2'], fg=self.colors['text'])
-            self.tokens_label.pack(anchor='w')
-            
-            self.delta_label = tk.Label(info, text="", font=('Segoe UI', 9),
-                                       bg=self.colors['bg2'], fg=self.colors['blue'])
-            self.delta_label.pack(anchor='w')
-            
-            # Time to handoff label
-            self.ttf_label = tk.Label(info, text="⏱️ —", font=('Segoe UI', 9),
-                                      bg=self.colors['bg2'], fg=self.colors['text2'])
-            self.ttf_label.pack(anchor='w')
-            
-            self.project_label = tk.Label(info, text="", font=('Segoe UI', 9),
-                                         bg=self.colors['bg2'], fg=self.colors['muted'])
-            self.project_label.pack(anchor='w', pady=(2, 0))
-            
-            # Tab bar
-            tab_bar = tk.Frame(self.root, bg=self.colors['bg3'], height=35)
-            tab_bar.pack(fill='x')
-            tab_bar.pack_propagate(False)
-            
-            tabs = [
-                ('📊 Diagnostics', 'diagnostics'),
-                ('📈 Token Stats', 'token_stats'),
-                ('📅 History', 'history'),
-                ('📊 Analytics', 'analytics')
-            ]
-            
-            self.tab_buttons = {}
-            for label, tab_id in tabs:
-                tab_btn = tk.Label(tab_bar, text=label, font=('Segoe UI', 9),
-                                  bg=self.colors['bg3'], fg=self.colors['text'],
-                                  cursor='hand2', padx=15, pady=8)
-                tab_btn.pack(side='left')
-                tab_btn.bind('<Button-1>', lambda e, t=tab_id: self.switch_tab(t))
-                self.tab_buttons[tab_id] = tab_btn
-                
-                # Highlight active tab
-                if tab_id == self.active_tab:
-                    tab_btn.config(bg=self.colors['blue'], fg='white')
-            
-            # Content area (scrollable)
-            self.content_frame = tk.Frame(self.root, bg=self.colors['bg2'])
-            self.content_frame.pack(fill='both', expand=True)
-            self.tab_frames = {} # Reset cache on full UI setup
-            
-            # Render active tab content immediately
-            self.render_tab_content()
-            
-            # Action buttons at bottom
-            actions_bar = tk.Frame(self.root, bg=self.colors['bg3'], padx=10, pady=8)
-            actions_bar.pack(fill='x')
-            
-            self.create_button(actions_bar, "💾 Export CSV", self.export_history_csv).pack(side='left', padx=2)
-            self.create_button(actions_bar, "🧹 Clean Old", self.cleanup_old_conversations).pack(side='left', padx=2)
-            self.create_button(actions_bar, "📦 Archive", self.archive_old_sessions).pack(side='left', padx=2)
-            self.create_button(actions_bar, "🔄 Restart", self.restart_antigravity).pack(side='left', padx=2)
-            
-            # Status bar (Consistent across modes)
-            self.status_frame = tk.Frame(self.root, bg=self.colors['bg3'], height=28)
-            self.status_frame.pack(fill='x', side='bottom')
-            self.status_frame.pack_propagate(False)
-            
-            self.status_label = tk.Label(self.status_frame, text="✓ Ready", font=('Segoe UI', 8),
-                                        bg=self.colors['bg3'], fg=self.colors['green'], anchor='w')
-            self.status_label.pack(side='left', padx=10)
-            
-            self.copy_btn = tk.Label(self.status_frame, text="📋 Copy", 
-                                    font=('Segoe UI', 8), cursor='hand2',
-                                    bg=self.colors['bg3'], fg=self.colors['blue'])
-            self.copy_btn.pack(side='right', padx=10)
-            self.copy_btn.bind('<Button-1>', lambda e: self.copy_handoff())
-            
-            self.refresh_btn = tk.Label(self.status_frame, text="🔄", 
-                                       font=('Segoe UI', 10), cursor='hand2',
-                                       bg=self.colors['bg3'], fg=self.colors['blue'])
-            self.refresh_btn.pack(side='right', padx=5)
-            self.refresh_btn.bind('<Button-1>', lambda e: self.force_refresh())
-        
-        # Keyboard shortcuts (global)
-        self.root.bind('<KeyPress-m>', lambda e: self.toggle_mini_mode())
-        self.root.bind('<KeyPress-plus>', lambda e: self.adjust_alpha(0.05))
-        self.root.bind('<KeyPress-minus>', lambda e: self.adjust_alpha(-0.05))
-        self.root.bind('<KeyPress-r>', lambda e: self.force_refresh())
-        self.root.bind('<KeyPress-a>', lambda e: self.show_advanced_stats())
-        self.root.bind('<KeyPress-d>', lambda e: self.show_analytics_dashboard())
-        self.root.bind('<KeyPress-e>', lambda e: self.export_history_csv())
+        # Bind keyboard shortcuts
+        bind_keyboard_shortcuts(self)
         
     def create_tooltip(self, widget, text):
         _tooltip = ToolTip(widget, text, self.colors)  # noqa: F841 - returns None, keeps reference

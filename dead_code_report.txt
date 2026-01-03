@@ -1,5 +1,0 @@
-context_monitor.pyw:1918: unused variable 'icon' (100% confidence)
-context_monitor.pyw:1918: unused variable 'item' (100% confidence)
-context_monitor.pyw:1921: unused variable 'icon' (100% confidence)
-context_monitor.pyw:1921: unused variable 'item' (100% confidence)
-context_monitor.pyw:2457: unused variable 'args' (100% confidence)
