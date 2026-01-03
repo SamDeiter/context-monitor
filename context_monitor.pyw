@@ -249,7 +249,9 @@ class ContextMonitor:
                 curr = recent[i]['value']
                 next_val = recent[i + 1]['value']
                 
-                if curr > next_val and curr > 1000000:
+                # Heuristic: Total context followed by remaining tokens
+                # Usually total is 128k, 200k, 1M, or 2M
+                if curr > next_val and curr >= 128000:
                     context_window = curr
                     tokens_remaining = next_val
                     break
@@ -414,7 +416,7 @@ class ContextMonitor:
             
             tk.Label(info, text="PROJECT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w', pady=(8,0))
-            self.session_label = tk.Label(info, text="—", font=('Segoe UI', 8),
+            self.session_label = tk.Label(info, text="—", font=('Segoe UI', 10),
                                           bg=self.colors['bg2'], fg=self.colors['text2'])
             self.session_label.pack(anchor='w')
             self.session_label.bind('<Button-3>', self.show_context_menu)
@@ -424,7 +426,7 @@ class ContextMonitor:
             history_frame.pack(side='right', fill='y', padx=(8, 0))
             history_frame.bind('<Button-3>', self.show_context_menu)
             
-            tk.Label(history_frame, text="RECENT", font=('Segoe UI', 7),
+            tk.Label(history_frame, text="RECENT", font=('Segoe UI', 9, 'bold'),
                     bg=self.colors['bg3'], fg=self.colors['muted']).pack(anchor='center')
             
             self.history_labels = []
@@ -1000,6 +1002,12 @@ class ContextMonitor:
                         lbl.config(text=text, fg=color, font=('Consolas', 11))
                 else:
                     lbl.config(text="—", fg=self.colors['muted'], font=('Consolas', 11))
+        
+        # Last updated timestamp
+        updated_time = datetime.now().strftime("%H:%M:%S")
+        if hasattr(self, 'status_label'):
+            current_status = self.status_label.cget('text').split(' | ')[0]
+            self.status_label.config(text=f"{current_status} | {updated_time}")
         
         # Update status and auto-copy at 80% (Requires status_label/frame)
         if hasattr(self, 'status_label') and hasattr(self, 'status_frame'):
