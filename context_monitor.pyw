@@ -15,9 +15,7 @@ import sys
 import atexit
 import ctypes
 from ctypes import wintypes
-import platform
 import threading
-import sys
 import time
 import csv
 from datetime import timedelta
@@ -28,6 +26,7 @@ from widgets import ToolTip
 from config import COLORS, MODELS, DEFAULT_SETTINGS, SETTINGS_FILE, HISTORY_FILE, ANALYTICS_FILE, CONVERSATIONS_DIR, BRAIN_DIR, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, FONTS
 from data_service import data_service
 from dialogs import show_history_dialog, show_diagnostics_dialog, show_advanced_stats_dialog
+from menu_builder import build_context_menu
 
 # Windows toast notifications
 try:
@@ -1586,145 +1585,8 @@ I am continuing work on the `{project_name}` project. We are reaching the contex
     # ==================== DIAGNOSTICS ====================
     
     def show_context_menu(self, event):
-        """Show right-click context menu with improved styling"""
-        menu = tk.Menu(self.root, tearoff=0, 
-                      bg=self.colors['bg2'], 
-                      fg=self.colors['text'],
-                      activebackground=self.colors['blue'], 
-                      activeforeground='white',
-                      font=('Segoe UI', 9),
-                      relief='flat',
-                      borderwidth=1)
-        
-        # Diagnostics section
-        menu.add_command(label="  📊  Show Diagnostics", command=self.show_diagnostics)
-        menu.add_command(label="  📈  Advanced Token Stats", command=self.show_advanced_stats)
-        menu.add_command(label="  📅  Usage History Graph", command=self.show_history)
-        menu.add_command(label="  📊  Analytics Dashboard (D)", command=self.show_analytics_dashboard)
-        menu.add_command(label="  💾  Export to CSV (E)", command=self.export_history_csv)
-        menu.add_separator()
-        
-        # Actions section
-        menu.add_command(label="  🧹  Clean Old Conversations", command=self.cleanup_old_conversations)
-        menu.add_command(label="  📦  Archive Old Sessions", command=self.archive_old_sessions)
-        menu.add_command(label="  🔄  Restart Antigravity", command=self.restart_antigravity)
-        menu.add_separator()
-        
-        # Sessions submenu
-        sessions_menu = tk.Menu(menu, tearoff=0,
-                              bg=self.colors['bg2'],
-                              fg=self.colors['text'],
-                              activebackground=self.colors['blue'],
-                              activeforeground='white')
-        
-        current_id = self.current_session['id'] if self.current_session else None
-    
-        # PERFORMANCE: Use cached session list (no blocking I/O)
-        sessions = self.sessions_cache[:15]
-        
-        
-        # Group sessions by project name
-        projects = OrderedDict()
-        for s in sessions:
-            # PERFORMANCE: Only use cached names in menu (no expensive detection)
-            if s['id'] in self.project_name_cache:
-                project_name = self.project_name_cache[s['id']]
-            else:
-                # Fallback to session ID for uncached sessions (fast)
-                project_name = s['id'][:16] + "..."
-            
-            if project_name not in projects:
-                projects[project_name] = []
-            projects[project_name].append(s)
-        
-        # Show sessions grouped by project
-        shown = 0
-        for project_name, proj_sessions in projects.items():
-            if shown >= 10:
-                break
-            
-            # Add project header
-            sessions_menu.add_command(label=f"── {project_name} ──", state='disabled')
-            
-            # Add sessions under this project
-            for s in proj_sessions[:3]:  # Max 3 per project
-                if shown >= 10:
-                    break
-                check = "✓ " if s['id'] == current_id else "  "
-                short_id = s['id'][:8]
-                # PERFORMANCE: Cap project name to prevent menu clipping
-                display_name = (project_name[:20] + "...") if len(project_name) > 20 else project_name
-                label = f"{check}{display_name} ({short_id}...)"
-                sessions_menu.add_command(label=label, 
-                                        command=lambda sid=s['id']: self.switch_session(sid))
-                shown += 1
-            
-            # Separator between projects
-            if shown < 10 and project_name != list(projects.keys())[-1]:
-                sessions_menu.add_separator()
-            
-        menu.add_cascade(label="  🔀  Switch Session", menu=sessions_menu)
-        menu.add_separator()
-        
-        # Mode toggle
-        if self.mini_mode:
-            menu.add_command(label="  ◳  Expand to Full Mode", command=self.toggle_mini_mode)
-        else:
-            menu.add_command(label="  ◱  Collapse to Mini Mode", command=self.toggle_mini_mode)
-        
-        menu.add_separator()
-        
-        # Polling speed submenu
-        speed_menu = tk.Menu(menu, tearoff=0,
-                            bg=self.colors['bg2'],
-                            fg=self.colors['text'],
-                            activebackground=self.colors['blue'],
-                            activeforeground='white')
-        
-        speeds = [
-            ("  ⚡  3 seconds (fast)", 3000),
-            ("  🔄  5 seconds", 5000),
-            ("  ⏱️  10 seconds (default)", 10000),
-            ("  🐢  30 seconds (slow)", 30000),
-        ]
-        
-        for label, interval in speeds:
-            check = "✓ " if self.polling_interval == interval else "  "
-            from functools import partial
-            speed_menu.add_command(
-                label=f"{check}{label}",
-                command=partial(self.set_polling_speed, interval)
-            )
-        
-        menu.add_cascade(label="  ⏱️  Refresh Speed", menu=speed_menu)
-        
-        # Model selection submenu
-        model_menu = tk.Menu(menu, tearoff=0,
-                             bg=self.colors['bg2'],
-                             fg=self.colors['text'],
-                             activebackground=self.colors['blue'],
-                             activeforeground='white')
-        
-        for name, limit in self.MODELS.items():
-            check = "✓ " if self.settings.get('model') == name else "  "
-            model_menu.add_command(
-                label=f"{check}{name}",
-                command=partial(self.set_model, name)
-            )
-        
-        menu.add_cascade(label="  🤖  Active Model", menu=model_menu)
-        
-        menu.add_separator()
-        menu.add_command(label="  📋  Copy Context Bridge", command=self.copy_handoff)
-        menu.add_command(label="  🔄  Reload UI (Dev)", command=self.reload_ui)
-        menu.add_separator()
-        menu.add_command(label="  ✕  Exit", command=self.cleanup_and_exit)
-        
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
-    
+        """Delegated to menu_builder (Phase 5: V2.48)"""
+        build_context_menu(self, event)
     def set_polling_speed(self, interval):
         """Set refresh rate and save to settings"""
         self.polling_interval = interval
