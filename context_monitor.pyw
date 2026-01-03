@@ -1008,8 +1008,8 @@ class ContextMonitor:
                         lbl.config(text=text, fg=color, font=('Consolas', 11, 'bold'))
                     else:
                         lbl.config(text=text, fg=color, font=('Consolas', 11))
-                    else:
-                        lbl.config(text="—", fg=self.colors['muted'], font=('Consolas', 11))
+                else:
+                    lbl.config(text="—", fg=self.colors['muted'], font=('Consolas', 11))
         
         # Update tab-specific labels if they exist (Full Mode Caching)
         if hasattr(self, 'stats_tokens_used_label') and self.stats_tokens_used_label.winfo_exists():
