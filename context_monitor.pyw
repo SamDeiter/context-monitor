@@ -401,7 +401,7 @@ class ContextMonitor:
             
             tk.Label(info, text="TOKENS LEFT", font=('Segoe UI', 8),
                     bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
-            self.tokens_label = tk.Label(info, text="—", font=('Segoe UI', 14, 'bold'),
+            self.tokens_label = tk.Label(info, text="—", font=('Segoe UI', 18, 'bold'),
                                          bg=self.colors['bg2'], fg=self.colors['text'])
             self.tokens_label.pack(anchor='w')
             self.tokens_label.bind('<Button-3>', self.show_context_menu)
@@ -429,7 +429,8 @@ class ContextMonitor:
             
             self.history_labels = []
             for i in range(5):  # Show last 5 deltas
-                lbl = tk.Label(history_frame, text="—", font=('Consolas', 8),
+                # Font size increased to 11 for better readability
+                lbl = tk.Label(history_frame, text="—", font=('Consolas', 11),
                               bg=self.colors['bg3'], fg=self.colors['text2'])
                 lbl.pack(anchor='e')
                 lbl.bind('<Button-3>', self.show_context_menu)
@@ -993,9 +994,12 @@ class ContextMonitor:
                     else:
                         text = f"{delta_val:,}"
                         color = self.colors['blue']
-                    lbl.config(text=text, fg=color)
+                    if i == 0: # Latest delta
+                        lbl.config(text=text, fg=color, font=('Consolas', 11, 'bold'))
+                    else:
+                        lbl.config(text=text, fg=color, font=('Consolas', 11))
                 else:
-                    lbl.config(text="—", fg=self.colors['muted'])
+                    lbl.config(text="—", fg=self.colors['muted'], font=('Consolas', 11))
         
         # Update status and auto-copy at 80% (Requires status_label/frame)
         if hasattr(self, 'status_label') and hasattr(self, 'status_frame'):
