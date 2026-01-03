@@ -1265,20 +1265,100 @@ I am continuing work on the `{project_name}` project. We are reaching the contex
     
     
     def load_history(self, force_reload=False):
-        """Load history using data_service (V2.46: Modularized)"""
-        return data_service.load_history(force_reload)
+        """Load history with caching (Sprint 1: Performance)"""
+        import time
+        now = time.time()
+        
+        # Return cache if valid (less than 5 seconds old for fast updates)
+        if not force_reload and self._history_cache is not None:
+            if now - self._history_cache_time < 5:
+                return self._history_cache
+        
+        # Load from disk
+        try:
+            if self.history_file.exists():
+                with open(self.history_file, 'r') as f:
+                    self._history_cache = json.load(f)
+                    self._history_cache_time = now
+                    return self._history_cache
+        except Exception as e:
+            print(f"History load error: {e}")
+        
+        self._history_cache = {}
+        self._history_cache_time = now
+        return self._history_cache
+
     def save_history(self, session_id, tokens):
-        """Save history using data_service (V2.46: Modularized)"""
-        throttle_seconds = max(2, self.polling_interval / 1000)
-        delta = data_service.save_history(session_id, tokens, self.last_tokens, throttle_seconds)
+        """Save history with caching and deferred writes (Sprint 1: Performance)"""
+        import time
+        now = time.time()
+        
+        # Calculate delta from last reading
+        delta = tokens - self.last_tokens if self.last_tokens > 0 else 0
         self.last_tokens = tokens
-        return delta
+        
+        # Throttle based on polling interval (convert ms to seconds, minimum 2s)
+        throttle_seconds = max(2, self.polling_interval / 1000)
+        
+        if not hasattr(self, 'last_history_save'):
+            self.last_history_save = 0
+            
+        # Always update cache, but throttle disk writes
+        data = self.load_history()
+        if session_id not in data:
+            data[session_id] = []
+        
+        # Add point with delta
+        data[session_id].append({
+            'ts': now,
+            'tokens': tokens,
+            'delta': delta
+        })
+        
+        # Keep last 200 points per session
+        if len(data[session_id]) > 200:
+            data[session_id] = data[session_id][-200:]
+        
+        # Update cache
+        self._history_cache = data
+        self._history_dirty = True
+        
+        # Only write to disk if throttle time has passed
+        if now - self.last_history_save >= throttle_seconds:
+            self._flush_history_cache()
+            self.last_history_save = now
+    
     def _flush_history_cache(self):
-        """Flush via data_service (V2.46: Modularized)"""
-        data_service._flush_history()
+        """Write cached history to disk (Sprint 1: Performance)"""
+        if not self._history_dirty or self._history_cache is None:
+            return
+            
+        try:
+            self.history_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.history_file, 'w') as f:
+                json.dump(self._history_cache, f)
+            self._history_dirty = False
+        except Exception as e:
+            print(f"History flush error: {e}")
+
     def _flush_analytics_cache(self):
-        """Flush via data_service (V2.46: Modularized)"""
-        data_service._flush_analytics()
+        """Write cached analytics to disk immediately"""
+        if self._analytics_cache is None:
+            return
+            
+        try:
+            self.analytics_file.parent.mkdir(parents=True, exist_ok=True)
+            save_data = {
+                'daily': self._analytics_cache.get('daily', {}),
+                'projects': {k: {'total': v['total']} for k, v in self._analytics_cache.get('projects', {}).items()}
+            }
+            with open(self.analytics_file, 'w') as f:
+                json.dump(save_data, f, indent=2)
+            # Minimal logging on exit
+            # print(f"[Analytics] Flushed to disk: {len(save_data.get('daily', {}))} days")
+        except Exception as e:
+            print(f"Analytics flush error: {e}")
+
     def draw_mini_graph(self):
         """Draw usage history graph in Full mode canvas"""
         if not self.current_session or not hasattr(self, 'graph_canvas'):
@@ -2481,19 +2561,71 @@ I am continuing work on the `{project_name}` project. We are reaching the contex
     # ==================== ANALYTICS SYSTEM ====================
     
     def load_analytics(self):
-        """Load analytics using data_service (V2.46: Modularized)"""
-        analytics = data_service.load_analytics()
-        self._analytics_cache = analytics  # Keep local reference for compatibility
-        return analytics
+        """Load persistent analytics data"""
+        try:
+            if self.analytics_file.exists():
+                with open(self.analytics_file, 'r') as f:
+                    self._analytics_cache = json.load(f)
+                    return self._analytics_cache
+        except Exception as e:
+            print(f"Analytics load error: {e}")
+        self._analytics_cache = {'daily': {}, 'projects': {}}
+        return self._analytics_cache
+    
     def save_analytics(self, tokens, project_name):
-        """Track analytics using data_service (V2.46: Modularized)"""
-        model_name = self.settings.get('model', 'Unknown')
-        analytics = data_service.save_analytics(tokens, self.last_tokens, project_name, model_name)
-        self._analytics_cache = analytics  # Keep local reference for compatibility
+        """Track daily and project-level token usage (with disk throttling)"""
+        import time
+        now = time.time()
         
-        # Check budget notification
+        # Throttle disk writes to max once per 30 seconds
+        if not hasattr(self, '_last_analytics_save'):
+            self._last_analytics_save = 0
+        
+        analytics = self.load_analytics()
         today = datetime.now().strftime('%Y-%m-%d')
+        
+        # Daily tracking
+        if today not in analytics['daily']:
+            analytics['daily'][today] = {'total': 0, 'sessions': 0}
+        
+        # Only increment if tokens increased (not session switch)
+        delta = tokens - self.last_tokens if self.last_tokens > 0 else 0
+        if delta > 0:
+            analytics['daily'][today]['total'] += delta
+            
+            # Project-level tracking
+            if project_name not in analytics['projects']:
+                analytics['projects'][project_name] = {'total': 0, 'sessions': []}
+            analytics['projects'][project_name]['total'] += delta
+
+            # Model-level tracking
+            current_model = self.settings.get('model', 'Unknown')
+            if 'models' not in analytics:
+                analytics['models'] = {}
+            if current_model not in analytics['models']:
+                analytics['models'][current_model] = {'total': 0}
+            analytics['models'][current_model]['total'] += delta
+        
+        self._analytics_cache = analytics
+        
+        # Only save to disk if 30 seconds have passed
+        if now - self._last_analytics_save >= 30:
+            try:
+                self.analytics_file.parent.mkdir(parents=True, exist_ok=True)
+                save_data = {
+                    'daily': analytics['daily'],
+                    'projects': {k: {'total': v['total']} for k, v in analytics['projects'].items()},
+                    'models': analytics.get('models', {})
+                }
+                with open(self.analytics_file, 'w') as f:
+                    json.dump(save_data, f, indent=2)
+                self._last_analytics_save = now
+            except Exception as e:
+                print(f"Analytics save error: {e}")
+        
+        # Check budget notification (already throttled internally)
         self.check_budget_notification(analytics, today)
+    
     def check_budget_notification(self, analytics, today):
         """Send desktop notification if approaching daily budget"""
         if not HAS_TOAST or not self._notifier:
