@@ -322,3 +322,151 @@ def bind_keyboard_shortcuts(monitor):
     monitor.root.bind('<KeyPress-a>', lambda e: monitor.show_advanced_stats())
     monitor.root.bind('<KeyPress-d>', lambda e: monitor.show_analytics_dashboard())
     monitor.root.bind('<KeyPress-e>', lambda e: monitor.export_history_csv())
+
+
+# ==== INLINE TAB RENDERERS (Extracted from context_monitor.pyw) ====
+
+def render_history_inline(monitor, parent):
+    """Render usage history graph inline"""
+    # Add title
+    title = tk.Label(parent, text="📅 Usage History (Last 24h)", 
+                    font=('Segoe UI', 12, 'bold'),
+                    bg=monitor.colors['bg2'], fg=monitor.colors['text'])
+    title.pack(anchor='w', padx=15, pady=(15, 5))
+    
+    # Graph canvas
+    canvas = tk.Canvas(parent, width=620, height=380,
+                      bg=monitor.colors['bg2'], highlightthickness=1,
+                      highlightbackground=monitor.colors['bg3'])
+    canvas.pack(padx=15, pady=10, fill='both', expand=True)
+    
+    # Draw graph immediately
+    monitor.graph_canvas = canvas
+    try:
+        monitor.draw_mini_graph()
+    except Exception as e:
+        canvas.create_text(310, 190, text=f"Graph error: {e}",
+                         fill=monitor.colors['muted'], font=('Segoe UI', 10))
+
+
+def render_diagnostics_inline(monitor, parent):
+    """Render system diagnostics inline"""
+    procs = monitor.get_antigravity_processes()
+    limits = monitor.thresholds
+    
+    total_mem = sum(p.get('Mem', 0) for p in procs)
+    
+    container = tk.Frame(parent, bg=monitor.colors['bg2'], padx=15, pady=15)
+    container.pack(fill='both', expand=True)
+    
+    # Title
+    tk.Label(container, text="🔧 System Diagnostics", font=('Segoe UI', 12, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w', pady=(0, 10))
+    
+    # System overview
+    info_frame = tk.Frame(container, bg=monitor.colors['bg'], padx=10, pady=8)
+    info_frame.pack(fill='x', pady=(0, 10))
+    
+    tk.Label(info_frame, text=f"💾 RAM: {monitor.total_ram_mb // 1024} GB  |  ⚙️ Processes: {len(procs)}  |  📊 Total Memory: {total_mem}MB",
+            font=('Segoe UI', 10), bg=monitor.colors['bg'], fg=monitor.colors['text']).pack(anchor='w')
+    
+    # Process list
+    tk.Label(container, text="Process Memory:", font=('Segoe UI', 9, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w', pady=(5, 5))
+    
+    for p in procs[:8]:
+        mem = p.get('Mem', 0)
+        ptype = p.get('Type', 'Unknown')
+        color = monitor.colors['red'] if mem > limits['proc_crit'] else (monitor.colors['yellow'] if mem > limits['proc_warn'] else monitor.colors['green'])
+        
+        tk.Label(container, text=f"  • {ptype}: {mem}MB",
+                font=('Segoe UI', 9), bg=monitor.colors['bg2'], fg=color).pack(anchor='w')
+
+
+def render_token_stats_inline(monitor, parent):
+    """Render token statistics inline"""
+    if not monitor.current_session:
+        return
+    
+    context_window = monitor._context_window
+    tokens_used = monitor.current_session['estimated_tokens'] // 10
+    context_limit = monitor._context_window
+    percent_used = min(100, (tokens_used / context_limit) * 100)
+    tokens_left = max(0, context_limit - tokens_used)
+    
+    container = tk.Frame(parent, bg=monitor.colors['bg2'], padx=15, pady=15)
+    container.pack(fill='both', expand=True)
+    
+    # Title
+    tk.Label(container, text="📊 Token Usage Dashboard", font=('Segoe UI', 12, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w', pady=(0, 10))
+    
+    # Context window
+    tk.Label(container, text="Context Window:", font=('Segoe UI', 9, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w', pady=(5, 5))
+    
+    usage_color = monitor.colors['red'] if percent_used >= 80 else (monitor.colors['yellow'] if percent_used >= 60 else monitor.colors['green'])
+    
+    # Store these for updates
+    monitor.stats_tokens_used_label = tk.Label(container, text=f"  • Tokens Used: {tokens_used:,} ({percent_used}%)",
+            font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=usage_color)
+    monitor.stats_tokens_used_label.pack(anchor='w')
+    
+    monitor.stats_tokens_left_label = tk.Label(container, text=f"  • Tokens Remaining: {tokens_left:,}",
+            font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['blue'])
+    monitor.stats_tokens_left_label.pack(anchor='w')
+    
+    tk.Label(container, text=f"  • Total Capacity: {context_window:,}",
+            font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['muted']).pack(anchor='w')
+    
+    # Breakdown
+    estimated_input = int(tokens_used * 0.4)
+    estimated_output = int(tokens_used * 0.6)
+    
+    tk.Label(container, text="Estimated Breakdown:", font=('Segoe UI', 9, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w', pady=(10, 5))
+    
+    tk.Label(container, text=f"  • Input (Your messages): {estimated_input:,}",
+            font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['blue']).pack(anchor='w')
+    tk.Label(container, text=f"  • Output (Assistant): {estimated_output:,}",
+            font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['green']).pack(anchor='w')
+
+
+def render_analytics_inline(monitor, parent):
+    """Render analytics dashboard inline"""
+    from datetime import datetime, timedelta
+    
+    container = tk.Frame(parent, bg=monitor.colors['bg2'], padx=15, pady=15)
+    container.pack(fill='both', expand=True)
+    
+    # Title
+    tk.Label(container, text="📊 Analytics Dashboard", font=('Segoe UI', 12, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w', pady=(0, 10))
+    
+    # Get analytics data
+    analytics = monitor.load_analytics()
+    today_key = datetime.now().strftime("%Y-%m-%d")
+    today_data = analytics.get('daily', {}).get(today_key, {})
+    
+    # Today's usage
+    tk.Label(container, text="Today's Usage:", font=('Segoe UI', 9, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w', pady=(5, 5))
+    
+    total_today = today_data.get('total', 0)
+    tk.Label(container, text=f"  • Total Tokens: {total_today:,}",
+            font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w')
+    
+    # Weekly summary
+    tk.Label(container, text="Last 7 Days:", font=('Segoe UI', 9, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w', pady=(10, 5))
+    
+    week_total = 0
+    for i in range(7):
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+        day_data = analytics.get('daily', {}).get(date, {})
+        week_total += day_data.get('total', 0)
+    
+    tk.Label(container, text=f"  • Total Tokens: {week_total:,}",
+            font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w')
+    tk.Label(container, text=f"  • Daily Average: {week_total // 7:,}",
+            font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['muted']).pack(anchor='w')
