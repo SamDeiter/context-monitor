@@ -353,9 +353,9 @@ class ContextMonitor:
             
         elif self.display_mode == 'compact':
             # Compact mode (current "full" mode) - reset transparency
-            # PERFORMANCE: Increased width to 400 to prevent "RECENT" truncation
+            # PERFORMANCE: Increased dimensions to 480x240 to prevent truncation
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"400x220+{x_pos}+{y_pos}")
+            self.root.geometry(f"480x240+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -1026,12 +1026,14 @@ class ContextMonitor:
             
             # Use project name from file if session was manually selected
             display_name = self.get_project_name(self.current_session['id'], skip_vscode=is_manual_session)
+            # PERFORMANCE: Cap display name to prevent layout breakage
+            capped_name = (display_name[:25] + "...") if len(display_name) > 25 else display_name
         
             # Update UI labels if they exist (Compact/Full mode)
             if hasattr(self, 'session_label'):
-                self.session_label.config(text=display_name)
+                self.session_label.config(text=capped_name)
             if hasattr(self, 'project_label'):
-                self.project_label.config(text=display_name)
+                self.project_label.config(text=capped_name)
 
         # Update tray icon (Run in all modes)
         if HAS_TRAY:
