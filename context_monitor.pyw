@@ -353,8 +353,9 @@ class ContextMonitor:
             
         elif self.display_mode == 'compact':
             # Compact mode (current "full" mode) - reset transparency
+            # PERFORMANCE: Increased width to 400 to prevent "RECENT" truncation
             self.root.attributes('-transparentcolor', '')
-            self.root.geometry(f"320x220+{x_pos}+{y_pos}")
+            self.root.geometry(f"400x220+{x_pos}+{y_pos}")
             self.root.update()  # Force resize
             
             # Header
@@ -1890,7 +1891,9 @@ Read those logs to understand what we were working on, then continue helping me.
                     break
                 check = "✓ " if s['id'] == current_id else "  "
                 short_id = s['id'][:8]
-                label = f"{check}{project_name} ({short_id}...)"
+                # PERFORMANCE: Cap project name to prevent menu clipping
+                display_name = (project_name[:20] + "...") if len(project_name) > 20 else project_name
+                label = f"{check}{display_name} ({short_id}...)"
                 sessions_menu.add_command(label=label, 
                                         command=lambda sid=s['id']: self.switch_session(sid))
                 shown += 1
@@ -1934,6 +1937,22 @@ Read those logs to understand what we were working on, then continue helping me.
         
         menu.add_cascade(label="  ⏱️  Refresh Speed", menu=speed_menu)
         
+        # Model selection submenu
+        model_menu = tk.Menu(menu, tearoff=0,
+                             bg=self.colors['bg2'],
+                             fg=self.colors['text'],
+                             activebackground=self.colors['blue'],
+                             activeforeground='white')
+        
+        for name, limit in self.MODELS.items():
+            check = "✓ " if self.settings.get('model') == name else "  "
+            model_menu.add_command(
+                label=f"{check}{name}",
+                command=partial(self.set_model, name)
+            )
+        
+        menu.add_cascade(label="  🤖  Active Model", menu=model_menu)
+        
         menu.add_separator()
         menu.add_command(label="  🔄  Reload UI (Dev)", command=self.reload_ui)
         menu.add_separator()
@@ -1944,6 +1963,30 @@ Read those logs to understand what we were working on, then continue helping me.
         finally:
             menu.grab_release()
     
+    def set_polling_speed(self, interval):
+        """Set refresh rate and save to settings"""
+        self.polling_interval = interval
+        self.settings['polling_interval'] = interval
+        self.save_settings()
+        self.status_label.config(text=f"✓ Polling: {interval/1000}s", fg=self.colors['blue'])
+        self.root.after(2000, lambda: self.status_label.config(text="✓ Ready", fg=self.colors['green']))
+
+    def set_model(self, model_name):
+        """Configure context window based on model presets"""
+        if model_name in self.MODELS:
+            limit = self.MODELS[model_name]
+            if limit:
+                self._context_window = limit
+                self.settings['context_window'] = limit
+            
+            self.settings['model'] = model_name
+            self.save_settings()
+            
+            # Update UI immediately
+            self.status_label.config(text=f"✓ Model: {model_name}", fg=self.colors['blue'])
+            self.load_session() # Force refresh with new window size
+            self.root.after(2000, lambda: self.status_label.config(text="✓ Ready", fg=self.colors['green']))
+
     def get_antigravity_processes(self):
         """Get memory/CPU usage of Antigravity processes (Fast fallback)"""
         # PowerShell/WMI is too slow on this user's machine (causing UI freeze)
