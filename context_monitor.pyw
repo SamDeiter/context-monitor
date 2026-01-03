@@ -1191,6 +1191,7 @@ Read those logs to understand what we were working on, then continue helping me.
                     'polling_interval': self.polling_interval,
                     'daily_budget': self._daily_budget,
                     'context_window': self._context_window,
+                    'model': self.settings.get('model'), # Persist model name
                     'window_x': self.root.winfo_x(),
                     'window_y': self.root.winfo_y()
                 }, f, indent=2)
