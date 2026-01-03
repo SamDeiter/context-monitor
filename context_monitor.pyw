@@ -89,6 +89,11 @@ class ContextMonitor:
         self.project_name_cache = {}
         self.project_name_timestamp = {}
         
+        # Tab caching (Sprint 1: Performance)
+        self.tab_frames = {}
+        self.tab_buttons = {}
+        self.active_tab = self.settings.get('active_tab', 'diagnostics')
+        
         # Polling settings (in milliseconds)
         self.polling_interval = self.settings.get('polling_interval', 10000)  # Default 10s
         self.last_tokens = 0  # For delta tracking
@@ -562,12 +567,14 @@ class ContextMonitor:
                 ('📊 Analytics', 'analytics')
             ]
             
+            self.tab_buttons = {}
             for label, tab_id in tabs:
                 tab_btn = tk.Label(tab_bar, text=label, font=('Segoe UI', 9),
                                   bg=self.colors['bg3'], fg=self.colors['text'],
                                   cursor='hand2', padx=15, pady=8)
                 tab_btn.pack(side='left')
                 tab_btn.bind('<Button-1>', lambda e, t=tab_id: self.switch_tab(t))
+                self.tab_buttons[tab_id] = tab_btn
                 
                 # Highlight active tab
                 if tab_id == self.active_tab:
@@ -576,6 +583,7 @@ class ContextMonitor:
             # Content area (scrollable)
             self.content_frame = tk.Frame(self.root, bg=self.colors['bg2'])
             self.content_frame.pack(fill='both', expand=True)
+            self.tab_frames = {} # Reset cache on full UI setup
             
             # Render active tab content immediately
             self.render_tab_content()
@@ -1000,8 +1008,27 @@ class ContextMonitor:
                         lbl.config(text=text, fg=color, font=('Consolas', 11, 'bold'))
                     else:
                         lbl.config(text=text, fg=color, font=('Consolas', 11))
-                else:
-                    lbl.config(text="—", fg=self.colors['muted'], font=('Consolas', 11))
+                    else:
+                        lbl.config(text="—", fg=self.colors['muted'], font=('Consolas', 11))
+        
+        # Update tab-specific labels if they exist (Full Mode Caching)
+        if hasattr(self, 'stats_tokens_used_label') and self.stats_tokens_used_label.winfo_exists():
+            usage_color = self.colors['red'] if percent >= 80 else (self.colors['yellow'] if percent >= 60 else self.colors['green'])
+            self.stats_tokens_used_label.config(text=f"  • Tokens Used: {tokens_used:,} ({percent}%)", fg=usage_color)
+        if hasattr(self, 'stats_tokens_left_label') and self.stats_tokens_left_label.winfo_exists():
+            self.stats_tokens_left_label.config(text=f"  • Tokens Remaining: {tokens_left:,}")
+            
+        # Refresh high-frequency tabs if visible
+        if self.display_mode == 'full':
+            if self.active_tab == 'diagnostics':
+                # Re-render diagnostics to get fresh process list
+                if self.active_tab in self.tab_frames and self.tab_frames[self.active_tab].winfo_exists():
+                    frame = self.tab_frames[self.active_tab]
+                    for widget in frame.winfo_children():
+                        widget.destroy()
+                    self.render_diagnostics_inline(frame)
+            elif self.active_tab == 'history':
+                self.draw_mini_graph()
         
         # Last updated timestamp
         updated_time = datetime.now().strftime("%H:%M:%S")
@@ -1379,39 +1406,60 @@ Read those logs to understand what we were working on, then continue helping me.
                               fill=color, outline='white', width=2)
     
     def switch_tab(self, tab_id):
-        """Switch active tab in Full mode"""
+        """Switch active tab in Full mode with widget caching"""
+        if self.active_tab == tab_id and tab_id in self.tab_frames:
+            return
+            
+        # Update buttons
+        for tid, btn in self.tab_buttons.items():
+            if tid == tab_id:
+                btn.config(bg=self.colors['blue'], fg='white')
+            else:
+                btn.config(bg=self.colors['bg3'], fg=self.colors['text'])
+                
+        # Hide current tab frame
+        if self.active_tab in self.tab_frames:
+            self.tab_frames[self.active_tab].pack_forget()
+            
         self.active_tab = tab_id
-        self.render_tab_content()  # Just re-render content, don't rebuild entire UI
+        self.render_tab_content()
+        self.save_settings()
     
     def render_tab_content(self):
-        """Render content for the active tab"""
+        """Render content for the active tab using cache"""
         if not hasattr(self, 'content_frame'):
             return
         
-        # Clear existing content
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
+        # If tab is already rendered, just show it
+        if self.active_tab in self.tab_frames:
+            self.tab_frames[self.active_tab].pack(fill='both', expand=True)
+            return
+
+        # Create new tab frame
+        tab_frame = tk.Frame(self.content_frame, bg=self.colors['bg2'])
+        self.tab_frames[self.active_tab] = tab_frame
+        tab_frame.pack(fill='both', expand=True)
         
         # Render based on active tab
         if self.active_tab == 'diagnostics':
-            self.render_diagnostics_inline()
+            self.render_diagnostics_inline(tab_frame)
         elif self.active_tab == 'token_stats':
-            self.render_token_stats_inline()
+            self.render_token_stats_inline(tab_frame)
         elif self.active_tab == 'history':
-            self.render_history_inline()
+            self.render_history_inline(tab_frame)
         elif self.active_tab == 'analytics':
-            self.render_analytics_inline()
+            self.render_analytics_inline(tab_frame)
     
-    def render_history_inline(self):
+    def render_history_inline(self, parent):
         """Render usage history graph inline"""
         # Add title
-        title = tk.Label(self.content_frame, text="📅 Usage History (Last 24h)", 
+        title = tk.Label(parent, text="📅 Usage History (Last 24h)", 
                         font=('Segoe UI', 12, 'bold'),
                         bg=self.colors['bg2'], fg=self.colors['text'])
         title.pack(anchor='w', padx=15, pady=(15, 5))
         
         # Graph canvas
-        canvas = tk.Canvas(self.content_frame, width=620, height=380,
+        canvas = tk.Canvas(parent, width=620, height=380,
                           bg=self.colors['bg2'], highlightthickness=1,
                           highlightbackground=self.colors['bg3'])
         canvas.pack(padx=15, pady=10, fill='both', expand=True)
@@ -1424,7 +1472,7 @@ Read those logs to understand what we were working on, then continue helping me.
             canvas.create_text(310, 190, text=f"Graph error: {e}",
                              fill=self.colors['muted'], font=('Segoe UI', 10))
     
-    def render_diagnostics_inline(self):
+    def render_diagnostics_inline(self, parent):
         """Render system diagnostics inline"""
         procs = self.get_antigravity_processes()
         files = self.get_large_conversations()
@@ -1432,7 +1480,7 @@ Read those logs to understand what we were working on, then continue helping me.
         
         total_mem = sum(p.get('Mem', 0) for p in procs)
         
-        container = tk.Frame(self.content_frame, bg=self.colors['bg2'], padx=15, pady=15)
+        container = tk.Frame(parent, bg=self.colors['bg2'], padx=15, pady=15)
         container.pack(fill='both', expand=True)
         
         # Title
@@ -1458,7 +1506,7 @@ Read those logs to understand what we were working on, then continue helping me.
             tk.Label(container, text=f"  • {ptype}: {mem}MB",
                     font=('Segoe UI', 9), bg=self.colors['bg2'], fg=color).pack(anchor='w')
     
-    def render_token_stats_inline(self):
+    def render_token_stats_inline(self, parent):
         """Render token statistics inline"""
         if not self.current_session:
             return
@@ -1468,7 +1516,7 @@ Read those logs to understand what we were working on, then continue helping me.
         tokens_left = max(0, context_window - tokens_used)
         percent_used = min(100, round((tokens_used / context_window) * 100))
         
-        container = tk.Frame(self.content_frame, bg=self.colors['bg2'], padx=15, pady=15)
+        container = tk.Frame(parent, bg=self.colors['bg2'], padx=15, pady=15)
         container.pack(fill='both', expand=True)
         
         # Title
@@ -1481,10 +1529,15 @@ Read those logs to understand what we were working on, then continue helping me.
         
         usage_color = self.colors['red'] if percent_used >= 80 else (self.colors['yellow'] if percent_used >= 60 else self.colors['green'])
         
-        tk.Label(container, text=f"  • Tokens Used: {tokens_used:,} ({percent_used}%)",
-                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=usage_color).pack(anchor='w')
-        tk.Label(container, text=f"  • Tokens Remaining: {tokens_left:,}",
-                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['blue']).pack(anchor='w')
+        # Store these for updates
+        self.stats_tokens_used_label = tk.Label(container, text=f"  • Tokens Used: {tokens_used:,} ({percent_used}%)",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=usage_color)
+        self.stats_tokens_used_label.pack(anchor='w')
+        
+        self.stats_tokens_left_label = tk.Label(container, text=f"  • Tokens Remaining: {tokens_left:,}",
+                font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['blue'])
+        self.stats_tokens_left_label.pack(anchor='w')
+        
         tk.Label(container, text=f"  • Total Capacity: {context_window:,}",
                 font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['muted']).pack(anchor='w')
         
@@ -1500,9 +1553,9 @@ Read those logs to understand what we were working on, then continue helping me.
         tk.Label(container, text=f"  • Output (Assistant): {estimated_output:,}",
                 font=('Segoe UI', 10), bg=self.colors['bg2'], fg=self.colors['green']).pack(anchor='w')
     
-    def render_analytics_inline(self):
+    def render_analytics_inline(self, parent):
         """Render analytics dashboard inline"""
-        container = tk.Frame(self.content_frame, bg=self.colors['bg2'], padx=15, pady=15)
+        container = tk.Frame(parent, bg=self.colors['bg2'], padx=15, pady=15)
         container.pack(fill='both', expand=True)
         
         # Title
