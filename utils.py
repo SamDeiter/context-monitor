@@ -59,8 +59,9 @@ def calculate_thresholds(ram_mb):
 
 def extract_pb_tokens(pb_file_path, default_context_window=1000000):
     """
-    Extract accurate token count from protobuf conversation file.
-    Uses model preset as context window (reliable) and extracts tokens_remaining from protobuf.
+    Extract token count from protobuf conversation file.
+    Uses file-size estimation (~4 bytes per token) which is more reliable than
+    protobuf metadata parsing which often grabbed unrelated values (timestamps, offsets).
     """
     try:
         with open(pb_file_path, 'rb') as f:
@@ -68,67 +69,10 @@ def extract_pb_tokens(pb_file_path, default_context_window=1000000):
         
         file_size = len(data)
         
-        # For small files (< 50KB), use simple estimation - protobuf metadata is unreliable
-        if file_size < 50000:
-            estimated_tokens = file_size // 4
-            return {
-                'tokens_used': estimated_tokens,
-                'context_window': default_context_window,
-                'tokens_remaining': default_context_window - estimated_tokens,
-                'method': 'estimation'
-            }
+        # File-size estimation: ~4 bytes per token (conservative, accounts for overhead)
+        estimated_tokens = file_size // 4
         
-        # For larger files, scan for token metadata in the tail
-        search_region = data[-50000:]
-        
-        candidates = []
-        offset = 0
-        while offset < len(search_region) - 5:
-            num, new_offset = parse_varint(search_region, offset)
-            if num is not None and 1000 < num < 30000000:
-                candidates.append({'value': num, 'position': offset})
-            offset += 1
-        
-        if not candidates:
-            estimated = file_size // 4
-            return {
-                'tokens_used': estimated,
-                'context_window': default_context_window,
-                'tokens_remaining': default_context_window - estimated,
-                'method': 'fallback'
-            }
-        
-        candidates.sort(key=lambda x: x['position'])
-        recent = candidates[-10:]  # Look at more candidates
-        
-        # Strategy: Find a value close to the model's context window
-        # The protobuf should contain both the context_window and tokens_remaining
-        tokens_remaining = None
-        
-        for c in reversed(recent):
-            val = c['value']
-            # If we find a value that looks like "remaining tokens" (< context window, reasonable size)
-            if val < default_context_window and val > 10000:
-                tokens_remaining = val
-                break
-        
-        if tokens_remaining is None:
-            # Fallback: use smallest recent value as remaining
-            sorted_vals = sorted([c['value'] for c in recent])
-            tokens_remaining = sorted_vals[0] if sorted_vals else default_context_window // 2
-        
-        # Always use model preset as context window (most reliable)
-        context_window = default_context_window
-        tokens_used = context_window - tokens_remaining
-        
-        # CRITICAL SANITY CHECK: tokens_used should be proportional to file size
-        # A typical token is ~4 bytes, so max plausible tokens = file_size / 3
-        max_plausible_tokens = file_size // 3
-        if tokens_used < 0 or tokens_used > max_plausible_tokens:
-            # Extraction failed, use file-size estimation
-            tokens_used = file_size // 4
-            tokens_remaining = context_window - tokens_used
-        
+        # Extract project name from file content
         project_name = None
         try:
             project_match = re.search(rb'GitHub[/\\]([A-Za-z0-9_-]+)', data)
@@ -138,11 +82,11 @@ def extract_pb_tokens(pb_file_path, default_context_window=1000000):
             pass
 
         return {
-            'tokens_used': tokens_used,
-            'context_window': context_window,
-            'tokens_remaining': tokens_remaining,
+            'tokens_used': estimated_tokens,
+            'context_window': default_context_window,
+            'tokens_remaining': default_context_window - estimated_tokens,
             'project_name': project_name,
-            'method': 'protobuf'
+            'method': 'estimation'
         }
     except Exception as e:
         print(f"[Token Extraction] Error: {e}")
