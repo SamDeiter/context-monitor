@@ -45,6 +45,7 @@ ContextMonitor (Main Application)
 ├── show_analytics_dashboard() # Usage history and budget
 ├── show_diagnostics()   # System health check
 ├── archive_old_sessions() # Gzip compression for old files
+├── ensure_logs_dir()    # Proactive directory creation for agents
 └── run()                # Main event loop
 
 ToolTip (Helper Class)

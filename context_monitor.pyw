@@ -217,9 +217,10 @@ class ContextMonitor:
             # Extract all varint numbers in reasonable token range
             candidates = []
             offset = 0
-            while offset < len(search_region) - 10:
+            while offset < len(search_region) - 5:
                 num, new_offset = self.parse_varint(search_region, offset)
-                if num and 100000 < num < 20000000:  # 100K to 20M tokens
+                # Lower bound reduced to 100 to catch smaller sessions
+                if num is not None and 100 < num < 30000000:  # 100 to 30M tokens
                     candidates.append({
                         'value': num,
                         'position': offset
@@ -868,6 +869,15 @@ class ContextMonitor:
         # Fallback to truncated session ID
         return session_id[:16] + "..."
     
+    def ensure_logs_dir(self, session_id):
+        """Proactively ensure the logs directory exists for agents to scan."""
+        try:
+            logs_dir = Path.home() / '.gemini' / 'antigravity' / 'brain' / session_id / '.system_generated' / 'logs'
+            if not logs_dir.exists():
+                logs_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"[Maintenance] Could not create logs dir: {e}")
+
     def load_session(self):
         sessions = self.get_sessions()
         if not sessions:
@@ -876,6 +886,9 @@ class ContextMonitor:
             return
             
         self.current_session = sessions[0]
+        
+        # Ensure logs directory exists for the current session (Fix for agent list_dir errors)
+        self.ensure_logs_dir(self.current_session['id'])
         
         # specific session selection logic
         if self.selected_session_id:
@@ -1010,13 +1023,14 @@ class ContextMonitor:
         tokens_left = max(0, context_window - tokens_used)
         percent = min(100, round((tokens_used / context_window) * 100))
         
+        home = Path.home()
         handoff = f"""I'm continuing from a previous session that ran low on context.
 
 **Previous Session ID:** `{self.current_session['id']}`
 
-**Project folder:** `C:\\Users\\sam.deiter\\.gemini\\antigravity\\scratch\\`
+**Project folder:** `{home}\\.gemini\\antigravity\\scratch\\`
 
-**Conversation logs:** `C:\\Users\\sam.deiter\\.gemini\\antigravity\\brain\\{self.current_session['id']}\\.system_generated\\logs\\`
+**Conversation logs:** `{home}\\.gemini\\antigravity\\brain\\{self.current_session['id']}\\.system_generated\\logs\\`
 
 Read those logs to understand what we were working on, then continue helping me."""
         
