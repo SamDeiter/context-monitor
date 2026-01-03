@@ -21,7 +21,8 @@ import sys
 import time
 import csv
 from datetime import timedelta
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+from functools import partial
 
 # Windows toast notifications
 try:
@@ -93,6 +94,7 @@ class ContextMonitor:
         self.tab_frames = {}
         self.tab_buttons = {}
         self.active_tab = self.settings.get('active_tab', 'diagnostics')
+        self.sessions_cache = [] # Cache for context menu
         
         # Polling settings (in milliseconds)
         self.polling_interval = self.settings.get('polling_interval', 10000)  # Default 10s
@@ -891,6 +893,7 @@ class ContextMonitor:
 
     def load_session(self):
         sessions = self.get_sessions()
+        self.sessions_cache = sessions # Store for context menu performance
         if not sessions:
             if not self.mini_mode and hasattr(self, 'status_label'):
                 self.status_label.config(text="⚠ No sessions")
@@ -1817,31 +1820,8 @@ Read those logs to understand what we were working on, then continue helping me.
         
         current_id = self.current_session['id'] if self.current_session else None
     
-        # PERFORMANCE: Use lightweight session list (no protobuf parsing)
-        # Only parse protobuf for the current session, not all sessions in menu
-        from functools import partial
-        from collections import OrderedDict
-        
-        # Get lightweight session list (file stats only, no token extraction)
-        sessions = []
-        try:
-            if self.conversations_dir.exists():
-                import os
-                with os.scandir(self.conversations_dir) as entries:
-                    for entry in entries:
-                        if not entry.is_file() or '.tmp' in entry.name:
-                            continue
-                        if entry.name.endswith('.pb') or entry.name.endswith('.pb.gz'):
-                            stat = entry.stat()
-                            session_id = entry.name[:-3] if entry.name.endswith('.pb') else entry.name[:-6]
-                            sessions.append({
-                                'id': session_id,
-                                'modified': stat.st_mtime
-                            })
-                sessions.sort(key=lambda x: x['modified'], reverse=True)
-                sessions = sessions[:15]  # Top 15 most recent
-        except Exception:
-            sessions = []
+        # PERFORMANCE: Use cached session list (no blocking I/O)
+        sessions = self.sessions_cache[:15]
         
         
         # Group sessions by project name
