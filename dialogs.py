@@ -826,3 +826,145 @@ def update_dashboard_stats(monitor, win, dashboard_refs):
         
     except Exception as e:
         print(f"Dashboard update error: {e}")
+
+# ==== MAINTENANCE DIALOGS (Extracted from context_monitor.pyw - Phase 4) ====
+from tkinter import messagebox, filedialog
+import csv
+import gzip
+import shutil
+from datetime import datetime
+from utils import get_large_conversations
+
+def cleanup_old_conversations(monitor):
+    """Delete conversation files older than 7 days and larger than 5MB"""
+    files = get_large_conversations(monitor.conversations_dir, min_size_mb=5)
+    if not files:
+        messagebox.showinfo("Cleanup", "No large files to clean up!")
+        return
+    
+    msg = f"Found {len(files)} large conversation files:\n\n"
+    for f in files:
+        msg += f"• {f['name']}: {f['size_mb']}MB\n"
+    msg += "\nDelete these files? (Current session will be preserved)"
+    
+    if messagebox.askyesno("Cleanup Old Conversations", msg):
+        deleted = 0
+        current_id = monitor.current_session['id'] if monitor.current_session else None
+        for f in files:
+            if current_id and current_id in str(f['path']):
+                continue  # Skip current session
+            try:
+                f['path'].unlink()
+                deleted += 1
+            except Exception as e:
+                print(f"Error deleting {f['path']}: {e}")
+        messagebox.showinfo("Cleanup Complete", f"Deleted {deleted} files.")
+
+def archive_old_sessions(monitor):
+    """Compress old session files using gzip to save disk space"""
+    # Find sessions older than 3 days that aren't already compressed
+    cutoff = datetime.now().timestamp() - (3 * 24 * 60 * 60)  # 3 days ago
+    current_id = monitor.current_session['id'] if monitor.current_session else None
+    
+    to_compress = []
+    total_size = 0
+    
+    for f in monitor.conversations_dir.glob('*.pb'):
+        if '.tmp' in f.name:
+            continue
+        if current_id and current_id in f.stem:
+            continue  # Skip current session
+        
+        stat = f.stat()
+        if stat.st_mtime < cutoff and stat.st_size > 100000:  # Older than 3 days, > 100KB
+            to_compress.append({
+                'path': f,
+                'size_mb': round(stat.st_size / 1024 / 1024, 2),
+                'age_days': int((datetime.now().timestamp() - stat.st_mtime) / 86400)
+            })
+            total_size += stat.st_size
+    
+    if not to_compress:
+        messagebox.showinfo("Archive", "No old sessions to compress!\n(Sessions must be >3 days old)")
+        return
+    
+    msg = f"Found {len(to_compress)} old sessions ({total_size/1024/1024:.1f} MB total):\n\n"
+    for f in to_compress[:5]:
+        msg += f"• {f['path'].stem[:16]}... ({f['size_mb']}MB, {f['age_days']}d old)\n"
+    if len(to_compress) > 5:
+        msg += f"... and {len(to_compress) - 5} more\n"
+    msg += f"\nCompress these to save ~70% disk space?"
+    
+    if messagebox.askyesno("Archive Old Sessions", msg):
+        compressed = 0
+        saved_bytes = 0
+        
+        for f in to_compress:
+            try:
+                orig_path = f['path']
+                gz_path = orig_path.with_suffix('.pb.gz')
+                
+                # Compress the file
+                with open(orig_path, 'rb') as f_in:
+                    with gzip.open(gz_path, 'wb', compresslevel=6) as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                
+                # Calculate savings
+                orig_size = orig_path.stat().st_size
+                new_size = gz_path.stat().st_size
+                saved_bytes += orig_size - new_size
+                
+                # Delete original
+                orig_path.unlink()
+                compressed += 1
+                
+            except Exception as e:
+                print(f"Error compressing {f['path']}: {e}")
+        
+        saved_mb = saved_bytes / 1024 / 1024
+        messagebox.showinfo("Archive Complete", 
+                          f"Compressed {compressed} sessions\nSaved {saved_mb:.1f} MB of disk space!")
+
+def export_history_csv(monitor):
+    """Export history to CSV via dialog"""
+    try:
+        # Get all history data
+        history = monitor.load_history()
+        analytics = monitor.load_analytics()
+        
+        # Flatten data for CSV
+        rows = []
+        for session_id, points in history.items():
+            proj_name = monitor.project_name_cache.get(session_id, "Unknown")
+            for p in points:
+                rows.append({
+                    'timestamp': datetime.fromtimestamp(p['ts']).strftime('%Y-%m-%d %H:%M:%S'),
+                    'session_id': session_id,
+                    'project': proj_name,
+                    'tokens': p['tokens'],
+                    'delta': p.get('delta', 0)
+                })
+        
+        if not rows:
+            messagebox.showinfo("Export", "No history data to export.")
+            return
+
+        # Sort by time
+        rows.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        # Save dialog
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv")],
+            initialfile=f"context_history_{datetime.now().strftime('%Y%m%d')}.csv"
+        )
+        
+        if filename:
+            with open(filename, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=['timestamp', 'session_id', 'project', 'tokens', 'delta'])
+                writer.writeheader()
+                writer.writerows(rows)
+            messagebox.showinfo("Export Successful", f"Saved {len(rows)} records to\n{filename}")
+            
+    except Exception as e:
+        messagebox.showerror("Export Error", f"Failed to export CSV:\n{e}")

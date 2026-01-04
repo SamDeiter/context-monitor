@@ -394,8 +394,16 @@ class ContextMonitor:
             session['project_name'] = cached['project_name']
             return cached['token_data'], cached['project_name']
             
-        # Perform expensive scan
+        # Perform standard scan (using fast stat)
         token_data = extract_pb_tokens(pb_path, self._context_window)
+        
+        # SAFEGUARD: Ignore transient drops during active writes (Race Condition Fix)
+        # If tokens dropped by >50% and file was modified <2s ago, it's likely a partial write.
+        if cached and token_data.get('tokens_used', 0) < (cached['token_data'].get('tokens_used', 0) * 0.5):
+            if (time.time() - mtime) < 2.0:
+                # Keep cache, ignore this incomplete read
+                return cached['token_data'], cached['project_name']
+
         project_name = token_data.get('project_name')
         
         # Update cache
@@ -434,163 +442,17 @@ class ContextMonitor:
             pass  # Silently ignore metadata resolution errors
 
     def get_active_vscode_project(self):
-        """Get active VS Code project using ctypes with caching (Zero-overhead process check)"""
-        import time
-        now = time.time()
-        
-        # Return cached result if still valid
-        if now - self._vscode_cache_time < VSCODE_CACHE_TTL:
-            return self._vscode_project_cache
-        
-        try:
-            # Use ctypes directly to avoid expensive subprocess/PowerShell calls
-            user32 = ctypes.windll.user32
-            
-            # REMOVED EXPLICIT TYPE DEFINITIONS to avoid global user32 conflicts
-            
-            # Get foreground window handle
-            
-            # Get foreground window handle
-            hwnd = user32.GetForegroundWindow()
-            if not hwnd:
-                return None
-                
-            # Get window title length
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length == 0:
-                return None
-            
-            # Get window title
-            buff = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buff, length + 1)
-            title = buff.value
-            
-            # Check if it's a VS Code window
-            if 'Visual Studio Code' in title:
-                parts = title.split(' - ')
-                if len(parts) >= 2:
-                    # The second-to-last part before "Visual Studio Code" is usually the project
-                    for part in reversed(parts):
-                        if 'Visual Studio Code' in part:
-                            continue
-                        clean = part.strip()
-                        if clean and not clean.endswith('.py') and not clean.endswith('.js'):
-                            # Cache the successful result
-                            self._vscode_project_cache = clean
-                            self._vscode_cache_time = now
-                            return clean
-        except Exception:
-            # Fail silently to avoid log spam/crashes on weird Windows APIs
-            self._vscode_project_cache = None
-            self._vscode_cache_time = now
-            return None
-        
-        self._vscode_project_cache = None
-        self._vscode_cache_time = now
-        return None
-    
+        """Delegated to utils module (Phase 5: V2.54)"""
+        from utils import get_active_vscode_project
+        return get_active_vscode_project()
     def get_recently_modified_project(self):
-        """Find the most recently modified project in GitHub folder"""
-        try:
-            github_dir = Path.home() / 'Documents' / 'GitHub'
-            if github_dir.exists():
-                projects = []
-                for project_dir in github_dir.iterdir():
-                    if project_dir.is_dir() and not project_dir.name.startswith('.'):
-                        # Check for recent activity (any file modified in last 10 minutes)
-                        try:
-                            # Check .git/index or any recent file
-                            git_index = project_dir / '.git' / 'index'
-                            if git_index.exists():
-                                mtime = git_index.stat().st_mtime
-                                projects.append((project_dir.name, mtime))
-                            else:
-                                # Check the folder itself
-                                mtime = project_dir.stat().st_mtime
-                                projects.append((project_dir.name, mtime))
-                        except:
-                            pass
-                
-                if projects:
-                    # Sort by modification time, newest first
-                    projects.sort(key=lambda x: x[1], reverse=True)
-                    return projects[0][0]
-        except Exception:
-            pass  # Silently ignore project detection errors
-        return None
-
+        """Delegated to utils module (Phase 5: V2.54)"""
+        from utils import get_recently_modified_project
+        return get_recently_modified_project(self.github_path)
     def get_project_name(self, session_id, skip_vscode=False):
-        """Extract project name using multiple detection strategies"""
-        # Check cache first (60 second cache to prevent PowerShell lag)
-        import time
-        now = time.time()
-        if session_id in self.project_name_cache:
-            if session_id in self.project_name_timestamp:
-                if now - self.project_name_timestamp[session_id] < 60:  # 60s cache
-                    return self.project_name_cache[session_id]
-        
-        project_name = None
-
-        # Strategy 1: Check active VS Code window (ONLY for current session - PowerShell is slow)
-        if not skip_vscode:
-            vscode_project = self.get_active_vscode_project()
-            if vscode_project:
-                project_name = vscode_project
-
-        # Strategy 2: Check brain folder for this session - has markdown files with project info
-        if not project_name:
-            try:
-                brain_dir = Path.home() / '.gemini' / 'antigravity' / 'brain' / session_id
-                if brain_dir.exists():
-                    # Check markdown files for project name mentions
-                    for md_file in brain_dir.glob('*.md'):
-                        try:
-                            content = md_file.read_text(encoding='utf-8', errors='ignore')[:2000]
-                            # Priority 1: Specific project keywords
-                            if 'UE5' in content or 'Blueprint' in content:
-                                project_name = 'UE5Blueprint'
-                                break
-                            elif 'context-monitor' in content.lower() or 'Context Monitor' in content:
-                                project_name = 'context-monitor'
-                                break
-                            
-                            # Priority 2: Look for project-specific files like task.md or implementation_plan.md
-                            # which often contain the project name in headings or paths
-                            if 'Implementation Plan' in content or '# Task' in content:
-                                # Try to find a project name in bracketed links or paths
-                                pat = r'[/\\]GitHub[/\\]([A-Za-z0-9_-]+)'
-                                match = re.search(pat, content)
-                                if match:
-                                    project_name = match.group(1)
-                                    break
-                            
-                            # Priority 3: Generic GitHub path detection
-                            match = re.search(r'GitHub[/\\]([A-Za-z0-9_-]+)', content)
-                            if match:
-                                project_name = match.group(1)
-                                break
-                        except:
-                            pass
-            except Exception as e:
-                print(f"Error checking brain folder: {e}")
-
-        # Note: code_tracker detection removed - it picks most recent project globally, not session-specific
-
-        # Strategy 3: Check recently modified GitHub folder
-        if not project_name:
-            recent_project = self.get_recently_modified_project()
-            if recent_project:
-                project_name = recent_project
-        
-        # Cache the result
-        if project_name:
-            self.project_name_cache[session_id] = project_name
-            self.project_name_timestamp[session_id] = now
-            return project_name
-        
-        # Fallback to truncated session ID
-        return session_id[:16] + "..."
-    
+        """Delegated to utils module (Phase 5: V2.54)"""
+        from utils import get_project_name
+        return get_project_name(session_id, self.github_path, skip_vscode)
     def ensure_logs_dir(self, session_id):
         """Proactively ensure the logs directory exists for agents to scan."""
         try:
@@ -1108,9 +970,7 @@ class ContextMonitor:
     
 
 
-    def show_history(self):
-        """Delegated to dialogs module (Phase 4: V2.47)"""
-        show_history_dialog(self)
+
     def flash_warning(self):
         """Flash the widget in mini mode when approaching limit"""
         if self.mini_mode and self.current_percent >= 60:
@@ -1246,119 +1106,18 @@ class ContextMonitor:
             return []
     
     def get_large_conversations(self, min_size_mb=5):
-        """Get conversation files larger than min_size_mb"""
-        large_files = []
-        try:
-            for f in self.conversations_dir.glob('*.pb'):
-                size_mb = f.stat().st_size / (1024 * 1024)
-                if size_mb >= min_size_mb:
-                    large_files.append({
-                        'name': f.stem[:8] + '...',
-                        'size_mb': round(size_mb, 1),
-                        'path': f
-                    })
-            large_files.sort(key=lambda x: x['size_mb'], reverse=True)
-        except Exception as e:
-            print(f"Error scanning files: {e}")
-        return large_files[:5]
-    
-    def show_diagnostics(self):
-        """Delegated to dialogs module (Phase 4: V2.47)"""
-        show_diagnostics_dialog(self)
+        """Delegated to utils module (Phase 4: V2.54)"""
+        from utils import get_large_conversations
+        return get_large_conversations(self.conversations_dir, min_size_mb)
+
     def cleanup_old_conversations(self):
-        """Delete conversation files older than 7 days and larger than 5MB"""
-        files = self.get_large_conversations(min_size_mb=5)
-        if not files:
-            messagebox.showinfo("Cleanup", "No large files to clean up!")
-            return
-        
-        msg = f"Found {len(files)} large conversation files:\n\n"
-        for f in files:
-            msg += f"• {f['name']}: {f['size_mb']}MB\n"
-        msg += "\nDelete these files? (Current session will be preserved)"
-        
-        if messagebox.askyesno("Cleanup Old Conversations", msg):
-            deleted = 0
-            current_id = self.current_session['id'] if self.current_session else None
-            for f in files:
-                if current_id and current_id in str(f['path']):
-                    continue  # Skip current session
-                try:
-                    f['path'].unlink()
-                    deleted += 1
-                except Exception as e:
-                    print(f"Error deleting {f['path']}: {e}")
-            messagebox.showinfo("Cleanup Complete", f"Deleted {deleted} files.")
-    
+        """Delegated to dialogs module (Phase 4: V2.54)"""
+        from dialogs import cleanup_old_conversations
+        cleanup_old_conversations(self)
     def archive_old_sessions(self):
-        """Compress old session files using gzip to save disk space"""
-        import gzip
-        import shutil
-        from datetime import datetime, timedelta
-        
-        # Find sessions older than 3 days that aren't already compressed
-        cutoff = datetime.now().timestamp() - (3 * 24 * 60 * 60)  # 3 days ago
-        current_id = self.current_session['id'] if self.current_session else None
-        
-        to_compress = []
-        total_size = 0
-        
-        for f in self.conversations_dir.glob('*.pb'):
-            if '.tmp' in f.name:
-                continue
-            if current_id and current_id in f.stem:
-                continue  # Skip current session
-            
-            stat = f.stat()
-            if stat.st_mtime < cutoff and stat.st_size > 100000:  # Older than 3 days, > 100KB
-                to_compress.append({
-                    'path': f,
-                    'size_mb': round(stat.st_size / 1024 / 1024, 2),
-                    'age_days': int((datetime.now().timestamp() - stat.st_mtime) / 86400)
-                })
-                total_size += stat.st_size
-        
-        if not to_compress:
-            messagebox.showinfo("Archive", "No old sessions to compress!\n(Sessions must be >3 days old)")
-            return
-        
-        msg = f"Found {len(to_compress)} old sessions ({total_size/1024/1024:.1f} MB total):\n\n"
-        for f in to_compress[:5]:
-            msg += f"• {f['path'].stem[:16]}... ({f['size_mb']}MB, {f['age_days']}d old)\n"
-        if len(to_compress) > 5:
-            msg += f"... and {len(to_compress) - 5} more\n"
-        msg += f"\nCompress these to save ~70% disk space?"
-        
-        if messagebox.askyesno("Archive Old Sessions", msg):
-            compressed = 0
-            saved_bytes = 0
-            
-            for f in to_compress:
-                try:
-                    orig_path = f['path']
-                    gz_path = orig_path.with_suffix('.pb.gz')
-                    
-                    # Compress the file
-                    with open(orig_path, 'rb') as f_in:
-                        with gzip.open(gz_path, 'wb', compresslevel=6) as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                    
-                    # Calculate savings
-                    orig_size = orig_path.stat().st_size
-                    new_size = gz_path.stat().st_size
-                    saved_bytes += orig_size - new_size
-                    
-                    # Delete original
-                    orig_path.unlink()
-                    compressed += 1
-                    
-                except Exception as e:
-                    print(f"Error compressing {f['path']}: {e}")
-            
-            saved_mb = saved_bytes / 1024 / 1024
-            messagebox.showinfo("Archive Complete", 
-                              f"Compressed {compressed} sessions\nSaved {saved_mb:.1f} MB of disk space!")
-    
+        """Delegated to dialogs module (Phase 4: V2.54)"""
+        from dialogs import archive_old_sessions
+        archive_old_sessions(self)
     def restart_antigravity(self):
         """Restart Antigravity IDE"""
         if messagebox.askyesno("Restart Antigravity", 
@@ -1381,9 +1140,7 @@ class ContextMonitor:
         except Exception as e:
             print(f"Error launching Antigravity: {e}")
     
-    def show_advanced_stats(self):
-        """Delegated to dialogs module (Phase 4: V2.47)"""
-        show_advanced_stats_dialog(self)
+
     def create_tray_icon(self, color):
         """Create a circle icon for the tray"""
         width = 64
@@ -1612,67 +1369,20 @@ class ContextMonitor:
         projects.sort(key=lambda x: x['tokens'], reverse=True)
         return projects[:10]  # Top 10
     
-    def show_analytics_dashboard(self):
-        """Delegated to dialogs module (Phase 3: V2.53)"""
-        from dialogs import show_analytics_dashboard
-        show_analytics_dashboard(self)
-
+    def show_analytics_dashboard(self):
+
+        """Delegated to dialogs module (Phase 3: V2.53)"""
+
+        from dialogs import show_analytics_dashboard
+
+        show_analytics_dashboard(self)
+
+
+
     def export_history_csv(self):
-        """Export token history to CSV file"""
-        try:
-            # Get all history data
-            history = self.load_history()
-            analytics = self.load_analytics()
-            
-            # Create export directory
-            export_dir = Path.home() / 'Documents' / 'ContextMonitor'
-            export_dir.mkdir(parents=True, exist_ok=True)
-            
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            # Export session history
-            session_file = export_dir / f'session_history_{timestamp}.csv'
-            with open(session_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['Session ID', 'Project', 'Timestamp', 'Tokens', 'Delta'])
-                
-                for session_id, data_points in history.items():
-                    project = self.get_project_name(session_id)
-                    for point in data_points:
-                        ts = datetime.fromtimestamp(point['ts']).strftime('%Y-%m-%d %H:%M:%S')
-                        writer.writerow([session_id[:16], project, ts, point['tokens'], point.get('delta', 0)])
-            
-            # Export daily summary
-            daily_file = export_dir / f'daily_summary_{timestamp}.csv'
-            with open(daily_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['Date', 'Total Tokens'])
-                
-                for date, data in sorted(analytics.get('daily', {}).items()):
-                    writer.writerow([date, data.get('total', 0)])
-            
-            # Export project summary
-            project_file = export_dir / f'project_summary_{timestamp}.csv'
-            with open(project_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['Project', 'Total Tokens'])
-                
-                for name, data in analytics.get('projects', {}).items():
-                    writer.writerow([name, data.get('total', 0)])
-            
-            messagebox.showinfo("Export Complete", 
-                               f"Files exported to:\n{export_dir}\n\n"
-                               f"• session_history_{timestamp}.csv\n"
-                               f"• daily_summary_{timestamp}.csv\n"
-                               f"• project_summary_{timestamp}.csv")
-            
-            # Open folder
-            os.startfile(export_dir)
-            
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export: {e}")
-
-
+        """Delegated to dialogs module (Phase 4: V2.54)"""
+        from dialogs import export_history_csv
+        export_history_csv(self)
     def cleanup_and_exit(self):
         """Properly cleanup and exit the application"""
         try:

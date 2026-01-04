@@ -319,7 +319,7 @@ def bind_keyboard_shortcuts(monitor):
     monitor.root.bind('<KeyPress-plus>', lambda e: monitor.adjust_alpha(0.05))
     monitor.root.bind('<KeyPress-minus>', lambda e: monitor.adjust_alpha(-0.05))
     monitor.root.bind('<KeyPress-r>', lambda e: monitor.force_refresh())
-    monitor.root.bind('<KeyPress-a>', lambda e: monitor.show_advanced_stats())
+    # 'a' shortcut removed (use 'd' for dashboard)
     monitor.root.bind('<KeyPress-d>', lambda e: monitor.show_analytics_dashboard())
     monitor.root.bind('<KeyPress-e>', lambda e: monitor.export_history_csv())
 
