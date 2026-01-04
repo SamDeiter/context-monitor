@@ -172,7 +172,7 @@ import time
 import os
 
 def get_active_vscode_project():
-    """Get active VS Code project using ctypes (Windows only)."""
+    """Get active VS Code/Antigravity project using ctypes (Windows only)."""
     if platform.system() != "Windows":
         return None
         
@@ -184,17 +184,25 @@ def get_active_vscode_project():
         user32.GetWindowTextW(hwnd, buff, length + 1)
         window_title = buff.value
         
+        # Check for both VS Code and Antigravity
+        ide_suffix = None
         if "Visual Studio Code" in window_title:
-            # Title format: "filename - project - Visual Studio Code"
+            ide_suffix = "Visual Studio Code"
+        elif "Antigravity" in window_title:
+            ide_suffix = "Antigravity"
+        
+        if ide_suffix:
+            # Title format: "filename - project - IDE"
             parts = window_title.split(' - ')
             if len(parts) >= 2:
                 # The project name is usually the second to last part
-                # e.g ["index.js", "my-project", "Visual Studio Code"]
+                # e.g ["index.js", "my-project", "Antigravity"]
                 return parts[-2].strip()
-            return window_title.replace(" - Visual Studio Code", "").strip()
+            return window_title.replace(f" - {ide_suffix}", "").strip()
     except Exception as e:
         print(f"Error getting active window: {e}")
     return None
+
 
 def get_recently_modified_project(github_path):
     """Find the most recently modified project in GitHub folder."""
