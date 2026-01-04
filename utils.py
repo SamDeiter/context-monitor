@@ -184,21 +184,20 @@ def get_active_vscode_project():
         user32.GetWindowTextW(hwnd, buff, length + 1)
         window_title = buff.value
         
-        # Check for both VS Code and Antigravity
-        ide_suffix = None
+        # Check for VS Code: "filename - project - Visual Studio Code"
         if "Visual Studio Code" in window_title:
-            ide_suffix = "Visual Studio Code"
-        elif "Antigravity" in window_title:
-            ide_suffix = "Antigravity"
-        
-        if ide_suffix:
-            # Title format: "filename - project - IDE"
             parts = window_title.split(' - ')
             if len(parts) >= 2:
-                # The project name is usually the second to last part
-                # e.g ["index.js", "my-project", "Antigravity"]
                 return parts[-2].strip()
-            return window_title.replace(f" - {ide_suffix}", "").strip()
+            return window_title.replace(" - Visual Studio Code", "").strip()
+        
+        # Check for Antigravity: "project - Antigravity - filename"
+        elif "Antigravity" in window_title:
+            parts = window_title.split(' - ')
+            if len(parts) >= 1:
+                # Project is the FIRST part in Antigravity
+                return parts[0].strip()
+            
     except Exception as e:
         print(f"Error getting active window: {e}")
     return None
