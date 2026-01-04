@@ -1,0 +1,18 @@
+
+
+
+
+CommandLine="c:\Users\Sam Deiter\AppData\Local\Programs\Antigravity\resources\app\extensions\antigravity\bin\language_server_windows_x64.exe" --enable_lsp --extension_server_port 58236 --csrf_token f27e86ff-5290-499d-bce8-5bf300736600 --random_port --workspace_id file_c_3A_Users_Sam_20Deiter_Documents_GitHub_family_household_manager --cloud_code_endpoint https://daily-cloudcode-pa.googleapis.com --app_data_dir antigravity --parent_pipe_path \\.\pipe\server_068a4d07a4640508
+
+
+
+
+
+CommandLine="c:\Users\Sam Deiter\AppData\Local\Programs\Antigravity\resources\app\extensions\antigravity\bin\language_server_windows_x64.exe" --enable_lsp --extension_server_port 58552 --csrf_token 0b4c31c9-f632-4851-a0ec-81954f2afd26 --random_port --workspace_id file_c_3A_Users_Sam_20Deiter_Documents_GitHub_context_monitor --cloud_code_endpoint https://daily-cloudcode-pa.googleapis.com --app_data_dir antigravity --parent_pipe_path \\.\pipe\server_9d4fb97b68e23e98
+
+
+
+
+
+
+

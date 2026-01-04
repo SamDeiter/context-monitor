@@ -8,22 +8,20 @@ from tkinter import messagebox
 from pathlib import Path
 from datetime import datetime
 import json
-import re
 import subprocess
 import os
 import sys
 import atexit
-import ctypes
 import threading
 import time
-import csv
-from datetime import timedelta
-from utils import get_total_memory, calculate_thresholds, extract_pb_tokens
+
+from utils import get_total_memory, calculate_thresholds, extract_pb_tokens, get_antigravity_processes
 from widgets import ToolTip
-from config import COLORS, MODELS, DEFAULT_SETTINGS, SETTINGS_FILE, HISTORY_FILE, ANALYTICS_FILE, CONVERSATIONS_DIR, VSCODE_CACHE_TTL
+from config import COLORS, MODELS, DEFAULT_SETTINGS, SETTINGS_FILE, HISTORY_FILE, ANALYTICS_FILE, CONVERSATIONS_DIR, GITHUB_DIR, VSCODE_CACHE_TTL
 from data_service import data_service
 from dialogs import show_history_dialog, show_diagnostics_dialog, show_advanced_stats_dialog
 from menu_builder import build_context_menu
+from quota_manager import quota_manager
 
 # Windows toast notifications
 try:
@@ -104,6 +102,7 @@ class ContextMonitor:
         
         # Paths (from config)
         self.conversations_dir = CONVERSATIONS_DIR
+        self.github_path = GITHUB_DIR
         self.history_file = HISTORY_FILE
         self.analytics_file = ANALYTICS_FILE
         
@@ -113,9 +112,8 @@ class ContextMonitor:
         self._notifier = ToastNotifier() if HAS_TOAST else None
         self._daily_budget = self.settings.get('daily_budget', DEFAULT_SETTINGS['daily_budget'])
         self._context_window = self.settings.get('context_window', DEFAULT_SETTINGS['context_window'])
-        # Migration: Force reset from old 2.1M default to 1M safe limit
-        if self._context_window > 2000000:
-            self._context_window = DEFAULT_SETTINGS['context_window']
+        # Migration: Cap removed to support Gemini 1.5 Pro 2M+
+
         self.save_settings()
         
         # Supported Models (from config)
@@ -164,6 +162,9 @@ class ContextMonitor:
         
         # Register event handlers
         self.root.bind('<Button-3>', self.show_context_menu)  # Right-click anywhere
+        
+        # Quota Manager
+        self.quota_manager = quota_manager
         
         self.setup_ui()
         self.load_session()
@@ -329,14 +330,10 @@ class ContextMonitor:
             if not self.conversations_dir.exists():
                 return []
                 
-            # DIRTY CHECK: Skip scan if directory mtime hasn't changed
-            try:
-                current_mtime = self.conversations_dir.stat().st_mtime
-                if current_mtime <= self.conversations_mtime and self.sessions_cache:
-                    return self.sessions_cache
-                self.conversations_mtime = current_mtime
-            except:
-                pass
+            # FAST SCAN: Use os.scandir for raw speed
+            # Cache optimization removed to fix "100% Usage" bug on new sessions
+            pass
+
 
             # FAST SCAN: Use os.scandir for raw speed
             with os.scandir(self.conversations_dir) as entries:
@@ -397,6 +394,13 @@ class ContextMonitor:
         # Perform standard scan (using fast stat)
         token_data = extract_pb_tokens(pb_path, self._context_window)
         
+        # SAFEGUARD: Handle Locked File (None return)
+        if token_data is None:
+            # If we have cache, return it. Otherwise return None.
+            if cached:
+                return cached['token_data'], cached['project_name']
+            return None, None
+
         # SAFEGUARD: Ignore transient drops during active writes (Race Condition Fix)
         # If tokens dropped by >50% and file was modified <2s ago, it's likely a partial write.
         if cached and token_data.get('tokens_used', 0) < (cached['token_data'].get('tokens_used', 0) * 0.5):
@@ -481,6 +485,12 @@ class ContextMonitor:
         # 3. Resolve Metadata for ACTIVE session (Sync, but only 1 file read)
         token_data, project_name = self.resolve_session_metadata(self.current_session)
         
+        # Handle None return from locked file
+        if token_data is None:
+             # Use fallback calculation if we have no metadata at all
+             pass 
+             
+        
         # 4. Start Background scan for context menu optimization
         threading.Thread(target=self.background_metadata_scan, daemon=True).start()
 
@@ -489,18 +499,34 @@ class ContextMonitor:
 
         context_window = self._context_window
         
-        # Use accurate token data
-        token_data = self.current_session.get('token_data')
-        if token_data:
-            tokens_used = token_data['tokens_used']
-            context_window = token_data['context_window']
-            tokens_left = token_data['tokens_remaining']
-        else:
-            # Fallback if first read failed
-            tokens_used = self.current_session['size'] // 40
-            tokens_left = max(0, context_window - tokens_used)
+        # === NEW: Try to use real API quota data first ===
+        api_status = quota_manager.get_status()
+        use_api_data = api_status.get('source') == 'antigravity_api'
         
-        percent = min(100, round((tokens_used / context_window) * 100))
+        if use_api_data:
+            # Use real quota data from Antigravity API
+            percent = round(100 - api_status.get('percent_remaining', 0))
+            tokens_used = 0  # API doesn't give raw tokens, just percentage
+            tokens_left = 0  # Will show percentage instead
+            
+            # For display purposes, estimate tokens from percentage
+            context_window = self._context_window
+            tokens_used = int(context_window * (percent / 100))
+            tokens_left = max(0, context_window - tokens_used)
+        else:
+            # Fallback: Use file-size based estimation
+            token_data = self.current_session.get('token_data')
+            if token_data:
+                tokens_used = token_data['tokens_used']
+                context_window = token_data['context_window']
+                tokens_left = token_data['tokens_remaining']
+            else:
+                # Fallback if first read failed
+                tokens_used = self.current_session['size'] // 40
+                tokens_left = max(0, context_window - tokens_used)
+            
+            percent = min(100, round((tokens_used / context_window) * 100))
+
         
         # Calculate delta from last reading
         delta = tokens_used - self.last_tokens if self.last_tokens > 0 else 0
@@ -528,7 +554,9 @@ class ContextMonitor:
             print(f"[DEBUG] Window%: {percent} | Tokens: {tokens_used} | Budget: {self._daily_budget} | Today: {tod_total}")
         
         if not self.mini_mode:
-            self.tokens_label.config(text=f"{tokens_left:,}")
+            # Show 0 if negative to avoid confusing the user
+            display_tokens = max(0, tokens_left)
+            self.tokens_label.config(text=f"{display_tokens:,}")
             
             # Update delta label
             if hasattr(self, 'delta_label'):
@@ -967,6 +995,8 @@ class ContextMonitor:
             self.render_history_inline(tab_frame)
         elif self.active_tab == 'analytics':
             self.render_analytics_inline(tab_frame)
+        elif self.active_tab == 'quota':
+            self.render_quota_inline(tab_frame)
     
 
 
@@ -997,6 +1027,11 @@ class ContextMonitor:
             self.root.after(500, self.flash_warning)
     
     
+    def render_quota_inline(self, parent):
+        """Delegated to ui_builder (Phase B: Quota)"""
+        from ui_builder import render_quota_inline
+        render_quota_inline(self, parent)
+    
     # ==================== DIAGNOSTICS ====================
     
     def show_context_menu(self, event):
@@ -1026,6 +1061,24 @@ class ContextMonitor:
         # Project detection
         project = self.project_name_cache.get(sid, "Unknown")
         
+        # Dynamic paths based on config
+        brain_dir = self.conversations_dir.parent / 'brain' / sid
+        
+        # Try to read task.md for next step
+        next_step = "[Paste User's Last Objective Here]"
+        try:
+            task_file = brain_dir / 'task.md'
+            if task_file.exists():
+                    with open(task_file, 'r', encoding='utf-8') as f:
+                        # Find first unchecked item
+                        for line in f:
+                            clean = line.strip()
+                            if clean.startswith('- [ ]'):
+                                next_step = clean[5:].strip()
+                                break
+        except Exception:
+            pass
+
         # Build "Context Bridge" Briefing
         bridge = [
             f"🚀 **CONTEXT BRIDGE: {project.upper()}**",
@@ -1033,11 +1086,11 @@ class ContextMonitor:
             f"Tokens: {used:,} / {limit:,} ({pct:.1f}%)",
             "",
             "📂 **CRITICAL PATHS**",
-            f"- Conversation: `C:\\Users\\Sam Deiter\\.gemini\\antigravity\\conversations\\{sid}.pb`",
-            f"- Brain Folder: `C:\\Users\\Sam Deiter\\.gemini\\antigravity\\brain\\{sid}`",
-            f"- Task List: `C:\\Users\\Sam Deiter\\.gemini\\antigravity\\brain\\{sid}\\task.md`",
-            f"- Implementation Plan: `C:\\Users\\Sam Deiter\\.gemini\\antigravity\\brain\\{sid}\\implementation_plan.md`",
-            f"- Logs: `C:\\Users\\Sam Deiter\\.gemini\\antigravity\\brain\\{sid}\\.system_generated\\logs`",
+            f"- Conversation: `{self.conversations_dir / (sid + '.pb')}`",
+            f"- Brain Folder: `{brain_dir}`",
+            f"- Task List: `{brain_dir / 'task.md'}`",
+            f"- Implementation Plan: `{brain_dir / 'implementation_plan.md'}`",
+            f"- Logs: `{brain_dir / '.system_generated' / 'logs'}`",
             "",
             "📝 **HANDOFF BRIEFING**",
             "This project is at a critical checkpoint. Please follow these steps:",
@@ -1045,7 +1098,7 @@ class ContextMonitor:
             "2. Review `implementation_plan.md` for upcoming architecture changes.",
             "3. Check the `.system_generated\\logs` for recent error patterns.",
             "",
-            "**Next Step:** [Paste User's Last Objective Here]"
+            f"**Next Step:** {next_step}"
         ]
         
         final_brief = "\n".join(bridge)
@@ -1077,33 +1130,9 @@ class ContextMonitor:
             self.root.after(2000, lambda: self.status_label.config(text="✓ Ready", fg=self.colors['green']))
 
     def get_antigravity_processes(self):
-        """Get memory/CPU usage of Antigravity processes (Fast fallback)"""
-        # PowerShell/WMI is too slow on this user's machine (causing UI freeze)
-        # We will iterate processes using tasklist which is faster, or just return empty for speed
-        try:
-             # Fast check using tasklist CSV format
-            cmd = "tasklist /FI \"IMAGENAME eq Antigravity.exe\" /FO CSV /NH"
-            result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
-            
-            data = []
-            if result.stdout:
-                for line in result.stdout.splitlines():
-                    if 'Antigravity' in line:
-                        parts = line.split('","')
-                        if len(parts) >= 5:
-                            pid = parts[1]
-                            mem_str = parts[4].replace('"', '').replace(' K', '').replace(',', '')
-                            mem_mb = int(mem_str) // 1024
-                            data.append({
-                                'Id': pid,
-                                'Type': 'Process', # Detailed type requires slow WMI
-                                'Mem': mem_mb,
-                                'CPU': 0 # CPU requires slow PerfCounters
-                            })
-            return data
-        except Exception as e:
-            print(f"Error getting processes: {e}")
-            return []
+        """Delegated to utils module (Phase 5: V2.55)"""
+        from utils import get_antigravity_processes
+        return get_antigravity_processes()
     
     def get_large_conversations(self, min_size_mb=5):
         """Delegated to utils module (Phase 4: V2.54)"""
@@ -1340,34 +1369,12 @@ class ContextMonitor:
         return f"{hours}h {mins}m"
     
     def get_weekly_summary(self):
-        """Get token usage for the past 7 days"""
-        analytics = self.load_analytics()
-        today = datetime.now()
-        
-        weekly = []
-        for i in range(7):
-            day = (today - timedelta(days=i)).strftime('%Y-%m-%d')
-            daily_data = analytics['daily'].get(day, {'total': 0})
-            weekly.append({
-                'date': day,
-                'tokens': daily_data.get('total', 0),
-                'day_name': (today - timedelta(days=i)).strftime('%a')
-            })
-        
-        return weekly
+        """Delegated to data_service (Phase 6: Deduplication)"""
+        return data_service.get_weekly_summary()
     
     def get_project_summary(self):
-        """Get token usage by project"""
-        analytics = self.load_analytics()
-        projects = []
-        for name, data in analytics.get('projects', {}).items():
-            projects.append({
-                'name': name,
-                'tokens': data.get('total', 0)
-            })
-        # Sort by usage
-        projects.sort(key=lambda x: x['tokens'], reverse=True)
-        return projects[:10]  # Top 10
+        """Delegated to data_service (Phase 6: Deduplication)"""
+        return data_service.get_project_summary()
     
     def show_analytics_dashboard(self):
 

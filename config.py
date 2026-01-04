@@ -9,6 +9,7 @@ BASE_DIR = Path.home() / '.gemini' / 'antigravity'
 SCRATCH_DIR = BASE_DIR / 'scratch' / 'token-widget'
 CONVERSATIONS_DIR = BASE_DIR / 'conversations'
 BRAIN_DIR = BASE_DIR / 'brain'
+GITHUB_DIR = Path.home() / 'Documents' / 'GitHub'
 
 SETTINGS_FILE = SCRATCH_DIR / 'settings.json'
 HISTORY_FILE = SCRATCH_DIR / 'history.json'
@@ -29,16 +30,28 @@ COLORS = {
 }
 
 # === AI MODELS ===
+# Context windows are estimates - Antigravity doesn't publish official limits
 MODELS = {
+    # --- Core Reasoning Models ---
     "Gemini 3 Pro (High)": 1_000_000,
-    "Gemini 3 Pro (Low)": 1_000_000,
+    "Gemini 3 Pro (Deep Think)": 1_000_000,
     "Gemini 3 Flash": 1_000_000,
     "Claude Sonnet 4.5": 200_000,
     "Claude Sonnet 4.5 (Thinking)": 200_000,
+    "Claude Opus 4.5": 200_000,
     "Claude Opus 4.5 (Thinking)": 200_000,
-    "GPT-OSS 120B (Medium)": 128_000,
+    "GPT-OSS": 128_000,
+    
+    # --- Auxiliary/Agent Models ---
+    "Nano Banana Pro": 32_000,  # Image generation
+    "Gemini 2.5 Pro UI Checkpoint": 1_000_000,  # Browser control
+    "Gemini 2.5 Flash": 1_000_000,  # Background tasks
+    "Gemini 2.5 Flash Lite": 500_000,  # Lite variant
+    
+    # --- Custom ---
     "Custom": None
 }
+
 
 # === DEFAULT SETTINGS ===
 DEFAULT_SETTINGS = {
@@ -63,6 +76,8 @@ HISTORY_CACHE_TTL = 5  # seconds
 ANALYTICS_SAVE_THROTTLE = 60  # seconds (increased from 30 for less disk I/O)
 VSCODE_CACHE_TTL = 10  # seconds - cache VS Code detection result
 MAX_HISTORY_POINTS = 200
+TOKEN_ESTIMATION_BYTES = 4
+DEFAULT_CONTEXT_WINDOW = 1_000_000
 
 # === FONT DEFINITIONS ===
 FONTS = {

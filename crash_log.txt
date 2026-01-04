@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "C:\Users\Sam Deiter\Documents\GitHub\context-monitor\context_monitor.pyw", line 1444, in <module>
+    app = ContextMonitor()
+          ^^^^^^^^^^^^^^^^
+  File "C:\Users\Sam Deiter\Documents\GitHub\context-monitor\context_monitor.pyw", line 173, in __init__
+    self.load_session()
+  File "C:\Users\Sam Deiter\Documents\GitHub\context-monitor\context_monitor.pyw", line 518, in load_session
+    project_name = self.get_project_name(self.current_session['id'], skip_vscode=is_manual_session)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sam Deiter\Documents\GitHub\context-monitor\context_monitor.pyw", line 459, in get_project_name
+    return get_project_name(session_id, self.github_path, skip_vscode)
+                                        ^^^^^^^^^^^^^^^^
+AttributeError: 'ContextMonitor' object has no attribute 'github_path'

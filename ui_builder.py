@@ -259,7 +259,8 @@ def setup_full_mode(monitor, w_px, h_px, x_pos, y_pos):
         ('📊 Diagnostics', 'diagnostics'),
         ('📈 Token Stats', 'token_stats'),
         ('📅 History', 'history'),
-        ('📊 Analytics', 'analytics')
+        ('📊 Analytics', 'analytics'),
+        ('💳 Quota', 'quota')
     ]
     
     monitor.tab_buttons = {}
@@ -470,3 +471,92 @@ def render_analytics_inline(monitor, parent):
             font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w')
     tk.Label(container, text=f"  • Daily Average: {week_total // 7:,}",
             font=('Segoe UI', 10), bg=monitor.colors['bg2'], fg=monitor.colors['muted']).pack(anchor='w')
+
+
+def render_quota_inline(monitor, parent):
+    """Render quota tracker inline"""
+    status = monitor.quota_manager.get_status()
+    
+    container = tk.Frame(parent, bg=monitor.colors['bg2'], padx=15, pady=15)
+    container.pack(fill='both', expand=True)
+    
+    # Title & Tier
+    header = tk.Frame(container, bg=monitor.colors['bg2'])
+    header.pack(fill='x', pady=(0, 10))
+    
+    tk.Label(header, text="💳 Quota Tracker", font=('Segoe UI', 12, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(side='left')
+    
+    tk.Label(header, text=f"Tier: {status['tier']}", font=('Segoe UI', 10, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['blue']).pack(side='right')
+    
+    # Primary Gauge Area
+    gauge_frame = tk.Frame(container, bg=monitor.colors['bg2'])
+    gauge_frame.pack(fill='x', pady=10)
+    
+    # Draw simple bar gauge
+    limit = status['limit']
+    used = status['used']
+    pct = status['percent_remaining']
+    
+    tk.Label(gauge_frame, text=f"Primary Quota ({used}/{limit})", font=('Segoe UI', 10),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w')
+    
+    bar_bg = tk.Frame(gauge_frame, bg=monitor.colors['bg3'], height=20)
+    bar_bg.pack(fill='x', pady=5)
+    
+    # Color based on remaining
+    color = monitor.colors['green']
+    if pct < 20: color = monitor.colors['red']
+    elif pct < 50: color = monitor.colors['yellow']
+    
+    bar_fill = tk.Frame(bar_bg, bg=color, height=20)
+    fill_width = pct / 100
+    bar_fill.place(relx=0, rely=0, relwidth=fill_width, relheight=1)
+    
+    # Next Reset Info
+    reset_sec = status['next_reset_seconds']
+    if reset_sec > 0:
+        mins = int(reset_sec // 60)
+        reset_text = f"Next slot recovery in: {mins}m"
+        reset_color = monitor.colors['yellow']
+    else:
+        reset_text = "Quota full available"
+        reset_color = monitor.colors['green']
+        
+    tk.Label(gauge_frame, text=reset_text, font=('Segoe UI', 9, 'italic'),
+            bg=monitor.colors['bg2'], fg=reset_color).pack(anchor='e')
+    
+    # Manual Add Buttons
+    btn_frame = tk.Frame(container, bg=monitor.colors['bg2'], pady=15)
+    btn_frame.pack(fill='x')
+    
+    tk.Label(btn_frame, text="Log Manual Usage:", font=('Segoe UI', 9, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['muted']).pack(anchor='w', pady=(0,5))
+    
+    def add_usage(type):
+        monitor.quota_manager.add_usage(type)
+        # Refresh current tab
+        for widget in parent.winfo_children(): widget.destroy()
+        render_quota_inline(monitor, parent)
+    
+    monitor.create_button(btn_frame, "+1 Chat", lambda: add_usage('standard')).pack(side='left', padx=5)
+    monitor.create_button(btn_frame, "+5 Agent Task", lambda: add_usage('agentic')).pack(side='left', padx=5)
+    
+    # Flow Logic
+    tk.Frame(container, bg=monitor.colors['bg3'], height=1).pack(fill='x', pady=20)
+    
+    tk.Label(container, text="Ancillary Credits (Flow/Whisk)", font=('Segoe UI', 10, 'bold'),
+            bg=monitor.colors['bg2'], fg=monitor.colors['text']).pack(anchor='w')
+    
+    flow_used = status['flow_used']
+    flow_limit = status['flow_limit']
+    
+    tk.Label(container, text=f"Used: {flow_used} / {flow_limit}", font=('Segoe UI', 9),
+             bg=monitor.colors['bg2'], fg=monitor.colors['text2']).pack(anchor='w', pady=5)
+             
+    monitor.create_button(container, "+1 Gen", lambda: [
+        monitor.quota_manager.add_flow_usage(1),
+        (lambda: [w.destroy() for w in parent.winfo_children()] or render_quota_inline(monitor, parent))()
+    ]).pack(anchor='w', pady=5)
+

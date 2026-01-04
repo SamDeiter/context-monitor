@@ -6,6 +6,37 @@ import ctypes
 import platform
 import re
 # Path objects passed from callers, no import needed
+import subprocess
+from config import DEFAULT_CONTEXT_WINDOW, TOKEN_ESTIMATION_BYTES
+
+def get_antigravity_processes():
+    """Get memory/CPU usage of Antigravity processes (Fast fallback)"""
+    # PowerShell/WMI is too slow on this user's machine (causing UI freeze)
+    # We will iterate processes using tasklist which is faster, or just return empty for speed
+    try:
+         # Fast check using tasklist CSV format
+        cmd = "tasklist /FI \"IMAGENAME eq Antigravity.exe\" /FO CSV /NH"
+        result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+        
+        data = []
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                if 'Antigravity' in line:
+                    parts = line.split('","')
+                    if len(parts) >= 5:
+                        pid = parts[1]
+                        mem_str = parts[4].replace('"', '').replace(' K', '').replace(',', '')
+                        mem_mb = int(mem_str) // 1024
+                        data.append({
+                            'Id': pid,
+                            'Type': 'Process', # Detailed type requires slow WMI
+                            'Mem': mem_mb,
+                            'CPU': 0 # CPU requires slow PerfCounters
+                        })
+        return data
+    except Exception as e:
+        print(f"Error getting processes: {e}")
+        return []
 
 def parse_varint(data, offset):
     """Parse a protobuf varint from data at offset."""
@@ -57,7 +88,7 @@ def calculate_thresholds(ram_mb):
         'total_crit': max(3000, int(ram_mb * 0.15))  # 15%
     }
 
-def extract_pb_tokens(pb_file_path, default_context_window=1000000):
+def extract_pb_tokens(pb_file_path, default_context_window=DEFAULT_CONTEXT_WINDOW):
     """
     Extract token count from protobuf conversation file.
     Uses file-size estimation (st_size // 4) for refined accuracy and stability.
@@ -76,15 +107,10 @@ def extract_pb_tokens(pb_file_path, default_context_window=1000000):
             file_size = stat.st_size
         except OSError:
             # File might be locked or moving
-            return {
-                'tokens_used': 0,
-                'context_window': default_context_window,
-                'tokens_remaining': default_context_window,
-                'method': 'locked'
-            }
+            return None
         
         # Estimate: 4 bytes per token
-        estimated_tokens = file_size // 4
+        estimated_tokens = file_size // TOKEN_ESTIMATION_BYTES
         
         # Extract project name (Optimized: First 100KB only)
         project_name = None

@@ -159,6 +159,37 @@ class DataService:
         except Exception as e:
             print(f"Analytics flush error: {e}")
     
+    def get_weekly_summary(self):
+        """Get token usage for the past 7 days."""
+        from datetime import datetime, timedelta
+        analytics = self.load_analytics()
+        today = datetime.now()
+        
+        weekly = []
+        for i in range(7):
+            day = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+            daily_data = analytics['daily'].get(day, {'total': 0})
+            weekly.append({
+                'date': day,
+                'tokens': daily_data.get('total', 0),
+                'day_name': (today - timedelta(days=i)).strftime('%a')
+            })
+        
+        return weekly
+    
+    def get_project_summary(self):
+        """Get token usage by project (Top 10)."""
+        analytics = self.load_analytics()
+        projects = []
+        for name, data in analytics.get('projects', {}).items():
+            projects.append({
+                'name': name,
+                'tokens': data.get('total', 0)
+            })
+        # Sort by usage
+        projects.sort(key=lambda x: x['tokens'], reverse=True)
+        return projects[:10]
+
     def get_today_usage(self):
         """Get today's total token usage."""
         analytics = self.load_analytics()

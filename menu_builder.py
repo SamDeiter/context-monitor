@@ -58,6 +58,25 @@ def build_context_menu(monitor, event):
     
     settings_menu.add_cascade(label="⏱️ Refresh Speed", menu=speed_menu)
 
+
+    # Quota Tier
+    quota_menu = tk.Menu(settings_menu, tearoff=0,
+                        bg=monitor.colors['bg2'], fg=monitor.colors['text'],
+                        activebackground=monitor.colors['blue'], activeforeground='white')
+    
+    current_tier = monitor.quota_manager.tier_id
+    from quota_config import TIERS
+    for tid, tdata in TIERS.items():
+        check = "✓ " if current_tier == tid else "  "
+        def set_tier(t):
+            return lambda: (
+                monitor.quota_manager.set_tier(t),
+                monitor.force_refresh()
+            )
+        quota_menu.add_command(label=f"{check}{tdata['label']}", command=set_tier(tid))
+        
+    settings_menu.add_cascade(label="💳 Quota Tier", menu=quota_menu)
+
     # Model Selection
     model_menu = tk.Menu(settings_menu, tearoff=0,
                          bg=monitor.colors['bg2'], fg=monitor.colors['text'],
